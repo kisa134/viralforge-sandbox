@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Tour, useTour, type TourStep } from "./Tour";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CreatorState, Message, QuickReply } from "@/lib/types";
 import { FAKE_CLIPS } from "@/lib/fixtures";
@@ -35,7 +36,17 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const CHAT_TOUR: TourStep[] = [
+  { title: "Это ViralForge — чат креатора", body: <>Здесь креатор получает оффер, готовые ролики, ссылку и кодовое слово — всё в одном чате. Тур займёт 30 секунд.</> },
+  { title: "Это песочница (DEMO)", selector: ".sandbox-banner", body: <>Всё в этом чате — <b>демо</b>: оффер, клипы, ссылка и баланс ненастоящие. Видео не генерируются (Higgsfield/Apify не вызываются), деньги не платятся.</> },
+  { title: "Как идёт диалог", selector: ".messages", body: <>Бот ведёт по шагам: <b>ниша → гео → аккаунт → оффер → «сделай видосы» → 3 клипа + подпись + кодовое слово → «запостил» → продажи → выплата</b>.</> },
+  { title: "Кнопки и текст", selector: ".composer", body: <>Жми быстрые кнопки или пиши словами: «статус», «мои ссылки», «выплаты», «помощь».</> },
+  { title: "Кабинет основателя", selector: ".nav-link-analytics", body: <>Тут <b>реальная</b> часть: креаторы, промокоды, ссылки на посты, импорт заказов Shopify, начисления и выплаты. Там же есть DEMO-пример с выдуманными цифрами.</> },
+  { title: "Инструкция", selector: ".nav-link-guide", body: <>Пошагово для основателя и для креатора. Тур можно перезапустить кнопкой «🧭 Тур».</> },
+];
+
 export function Chat() {
+  const tour = useTour("chat");
   const [messages, setMessages] = useState<Message[]>([]);
   const [state, setState] = useState<CreatorState>(INITIAL);
   const [replies, setReplies] = useState<QuickReply[]>([]);
@@ -426,9 +437,14 @@ export function Chat() {
           <h1>ViralForge</h1>
           <div className="sub">CPA Chat OS · v1 sandbox</div>
         </div>
-        <span className="badge">SANDBOX v1</span>
-        <Link className="nav-link-analytics" href="/analytics">📊 Аналитика</Link>
+        <div className="hdr-links">
+          <span className="badge" style={{ marginLeft: 0 }}>SANDBOX v1</span>
+          <Link className="hdr-btn accent nav-link-analytics" href="/analytics">📊 Аналитика</Link>
+          <Link className="hdr-btn nav-link-guide" href="/guide">❓ Как это работает</Link>
+          <button className="hdr-btn nav-tour" onClick={tour.start}>🧭 Тур</button>
+        </div>
       </header>
+      <Tour steps={CHAT_TOUR} open={tour.open} onClose={tour.close} />
 
       <div className="messages">
         {messages.length === 0 && (

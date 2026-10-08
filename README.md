@@ -51,8 +51,8 @@ Next.js 14 App Router · React 18 · TypeScript · CSS
 
 ## Analytics cabinet (`/analytics`)
 
-- Live: https://kisa134.github.io/viralforge-sandbox/analytics/ (chat header → «📊 Аналитика», cabinet → «← Чат»)
-- Spec: `docs/ANALYTICS_SYSTEM.md` · DB: `db/analytics_schema.sql` (Postgres/Supabase, validated by executing in PGlite)
-- Data sources (`lib/analytics/`): `demo.ts` — **DEMO, generated example data, not real** · `csv.ts` — import orders/posts CSV in-browser (localStorage) · `supabase.ts` — stub, on when `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set at build time
-- Metrics: `lib/analytics/metrics.ts` (formulas = spec §6)
-- Supabase switch-on: run `db/analytics_schema.sql` in Supabase SQL editor → enable Auth + RLS (site is public!) → add repo secrets `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (already wired in `.github/workflows/pages.yml`) → re-run the Pages workflow.
+- Live: https://kisa134.github.io/viralforge-sandbox/analytics/ · guide: https://kisa134.github.io/viralforge-sandbox/guide/ (first-visit tours on chat + cabinet, «🧭 Тур» to replay)
+- Data source toggle **Демо / Мои CSV / База**: `demo.ts` — generated example (labelled DEMO everywhere) · `workspace.ts` — browser workspace (localStorage): creators, `LIKKY-<NICK>` promo codes, Shopify discount links, Shopify orders CSV import attributed by *Discount Code*, payouts, JSON backup · `supabase.ts` + `manage.ts` — live Supabase (magic-link login, admin-only RLS)
+- Supabase project `wdvwinmsdkortvchkgxe`: migrations in `supabase/migrations/`, edge functions `supabase/functions/r` (click redirect `…/functions/v1/r?s=<slug>`) and `supabase/functions/shopify-orders-webhook` (HMAC, `SHOPIFY_WEBHOOK_SECRET`)
+- Founder go-live checklist (RU): `docs/GO_LIVE.md` · spec: `docs/ANALYTICS_SYSTEM.md` · schema copy: `db/analytics_schema.sql`
+- Build uses repo secrets `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` (publishable key; safe in the browser because RLS allows only emails in `admins`)

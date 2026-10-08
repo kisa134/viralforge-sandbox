@@ -3,7 +3,7 @@
 -- Conventions: money = integer cents + currency; timestamps = timestamptz (UTC stored, report in Asia/Dubai);
 -- PII only as salted sha256 hashes; enums as CHECK constraints (easy to extend); no soft delete — status fields.
 
-create extension if not exists pgcrypto;
+-- gen_random_uuid() is built into Postgres 13+; no extension needed.
 
 -- ───────────────────────── Store & offers ─────────────────────────
 create table brand (

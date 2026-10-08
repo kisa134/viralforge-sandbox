@@ -52,6 +52,7 @@ export interface Commission {
   id: string; conversion_order_id: string | null; creator_id: string;
   kind: "CPA" | "REVSHARE" | "BONUS" | "ADJUSTMENT" | "CLAWBACK";
   amount_cents: number; status: "HELD" | "APPROVED" | "PAID" | "VOID"; payout_id: string | null;
+  hold_until?: string | null; needs_amount?: boolean; note?: string | null;
 }
 export interface Payout { id: string; creator_id: string; amount_cents: number; status: "DRAFT" | "PROCESSING" | "PAID" | "FAILED"; paid_at: string | null; method: string }
 export interface CostItem {
