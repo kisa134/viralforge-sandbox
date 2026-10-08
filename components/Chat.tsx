@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CreatorState, Message, QuickReply } from "@/lib/types";
 import { FAKE_CLIPS } from "@/lib/fixtures";
@@ -426,6 +427,7 @@ export function Chat() {
           <div className="sub">CPA Chat OS · v1 sandbox</div>
         </div>
         <span className="badge">SANDBOX v1</span>
+        <Link className="nav-link-analytics" href="/analytics">📊 Аналитика</Link>
       </header>
 
       <div className="messages">
