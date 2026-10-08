@@ -1,4 +1,4 @@
-// Click redirect: GET /functions/v1/r?s=<slug>  →  log click + event  →  302 to the Shopify discount link (+ref=<slug>)
+// Click redirect: GET /functions/v1/r?s=<slug>  →  log click + event  →  302 to the product page (dest_url, +ref=<slug>)
 // Public (verify_jwt = false). Uses the service role internally; never exposes data.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";

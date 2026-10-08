@@ -52,7 +52,8 @@ Next.js 14 App Router · React 18 · TypeScript · CSS
 ## Analytics cabinet (`/analytics`)
 
 - Live: https://kisa134.github.io/viralforge-sandbox/analytics/ · guide: https://kisa134.github.io/viralforge-sandbox/guide/ (first-visit tours on chat + cabinet, «🧭 Тур» to replay)
-- Data source toggle **Демо / Мои CSV / База**: `demo.ts` — generated example (labelled DEMO everywhere) · `workspace.ts` — browser workspace (localStorage): creators, `LIKKY-<NICK>` promo codes, Shopify discount links, Shopify orders CSV import attributed by *Discount Code*, payouts, JSON backup · `supabase.ts` + `manage.ts` — live Supabase (magic-link login, admin-only RLS)
-- Supabase project `wdvwinmsdkortvchkgxe`: migrations in `supabase/migrations/`, edge functions `supabase/functions/r` (click redirect `…/functions/v1/r?s=<slug>`) and `supabase/functions/shopify-orders-webhook` (HMAC, `SHOPIFY_WEBHOOK_SECRET`)
+- Data source toggle **Демо / Мои CSV / База**: `demo.ts` — generated example (labelled DEMO everywhere) · `workspace.ts` — browser workspace (localStorage): creators, product links `likky.store/products/<handle>?ref=<slug>&utm_*`, Shopify orders CSV import (attributed by optional `creator`/`ref` columns or manual per-order assignment), payouts, JSON backup · `supabase.ts` + `manage.ts` — live Supabase (magic-link login, admin-only RLS)
+- **Attribution is link-only** (founder decision 2026-10-08, no Shopify discount codes): `ref` from `landing_site` / `landing_site_ref` / cart `note_attributes` / `referring_site` → tracked link → creator; manual assignment via `attribute_order_manual()`.
+- Supabase project `wdvwinmsdkortvchkgxe`: migrations in `supabase/migrations/`, edge functions `supabase/functions/r` (click redirect `…/functions/v1/r?s=<slug>` → product page with `ref`) and `supabase/functions/shopify-orders-webhook` (HMAC, `SHOPIFY_WEBHOOK_SECRET`)
 - Founder go-live checklist (RU): `docs/GO_LIVE.md` · spec: `docs/ANALYTICS_SYSTEM.md` · schema copy: `db/analytics_schema.sql`
 - Build uses repo secrets `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` (publishable key; safe in the browser because RLS allows only emails in `admins`)

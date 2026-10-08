@@ -123,7 +123,7 @@ flowchart LR
 | **PostMetricsSnapshot** | Метрики поста во времени | `id, post_id, captured_at, age_hours, views, likes, comments, shares, saves, avg_watch_s?, hold_3s_pct?, keyword_comments?, source (APIFY / API / SCREENSHOT)` | скрейпер по расписанию | APIFY / SOCIAL / MANUAL |
 | **DMConversation** | Ответ на кодовое слово | `id, post_id?, keyword_id, creator_id, platform, fan_handle_hash, started_at, link_sent_at, link_token, source (MANYCHAT / BOT / SELF_REPORT)` | DM-бот или креатор | DM / MANUAL |
 | **TrackedLink** | Персональная ссылка | `token (PK), creator_id, offer_id, post_id?, sub_id?, promo_code_id?, dest_url, utm_* , created_at, revoked_at` | app (автоминт) | REDIR |
-| **PromoCode** | Код креатора в Shopify | `code, creator_id, offer_id, shopify_discount_id, discount_pct, status` | оператор / app | SHOPIFY |
+| **PromoCode** | Внутренний ID креатора `LIKKY-{NICK}` (в Shopify не заводится; запасной сигнал) | `code, creator_id, offer_id, shopify_discount_id, discount_pct, status` | оператор / app | SHOPIFY |
 | **Click** | Переход по ссылке | `id, token, clicked_at, ip_hash, ua_hash, referer, country, is_bot, visitor_id` | редиректор | REDIR |
 | **Session** (Visitor) | Визит в магазин | `id, visitor_id, token?, started_at, landing_url, utm_*, pages, product_viewed, added_to_cart, checkout_started` | Custom Pixel | PIXEL |
 
@@ -236,32 +236,35 @@ erDiagram
 
 ## 5. Атрибуция
 
-Совместимо с `ATTRIBUTION.md`: **последнее оплачиваемое не-фрод касание в окне** выигрывает; приоритет при равенстве `PROMO > LINK > KEYWORD > MANUAL`; платим только за оплаченный заказ, пережив удержание.
+> **Решение основателя (2026-10-08): коды скидок Shopify не используем — атрибуция только по ссылкам.** Ссылка ведёт прямо на товар `likky.store/products/{handle}?ref={slug}&utm_source={platform}&utm_medium=creator&utm_campaign={creator}&utm_content={post}`; `ref` = slug трекинг-ссылки (= код поста). `LIKKY-{NICK}` остаётся только внутренним ID креатора.
+
+Совместимо с `ATTRIBUTION.md`: **последнее оплачиваемое не-фрод касание в окне** выигрывает; приоритет при равенстве `LINK (ref) > PIXEL > KEYWORD > MANUAL`, код скидки — лишь запасной сигнал, если вдруг есть в заказе; платим только за оплаченный заказ, пережив удержание.
 
 ### 5.1 Идентификаторы в цепочке
 
 | Носитель | Формат | Что связывает | Как доходит до заказа |
 |---|---|---|---|
-| **Tracked link** | `go.<домен>/c/{token}` (base62, ~64 бит) | creator × offer (± post, sub_id) | редирект → `likky.store/discount/{CODE}?redirect=/products/{handle}&utm_source=vf&utm_medium=creator&utm_campaign={offer}&utm_content={post_or_creator}&ref={token}` → в Shopify попадает в `landing_site`, код в `discount_codes` |
-| **Promo code** | `LIKKY-{NICK}` (1 на креатора; по посту не делаем — неудобно) | creator (× offer) | `discount_codes[]` в вебхуке. Самый крепкий сигнал |
+| **Tracked link** | slug `{nick}-{N}`; короткая `…/functions/v1/r?s={slug}` (считает клики) | creator × offer × post | 302 → `likky.store/products/{handle}?ref={slug}&utm_source={platform}&utm_medium=creator&utm_campaign={creator}&utm_content={slug}` → в Shopify попадает в `landing_site` / `landing_site_ref`; сниппет темы дублирует `ref` в атрибуты корзины (`_vf_ref`) → `note_attributes` |
+| **Creator ID** | `LIKKY-{NICK}` | creator | внутренний идентификатор; в Shopify не заводится. Если заказ вдруг несёт такой код скидки — используется как запасной сигнал |
 | **Keyword** | `DRAGON`, `GLOW42` (формульное слово + суффикс креатора/поста) | creator × offer (± post) | сам по себе не оплачивается; в DM уходит ссылка поста → LINK |
 | **Pixel token** | `vf_token` в cookie/localStorage 7d [окно `[X]`] | visitor → token | Custom Pixel шлёт `checkout_completed` с `vf_token` → матч по `order_id` |
 | **Manual** | оператор | любой заказ | очередь «неатрибутированные заказы» |
 
-Ключевой ход: **ссылка автоматически применяет промокод креатора** через Shopify discount link. Тогда даже если cookie потерялась (Instagram in-app браузер, переход между устройствами), промокод в заказе всё равно указывает на креатора. Требует решения: даём ли покупателю скидку по коду (вопрос §10.4). Если нет — код можно делать «нулевым» бонусом (бесплатная доставка) или полагаться на `ref`/pixel.
+Ключевой риск link-only: `landing_site` — первая страница **визита с заказом**. Если покупатель вернулся позже напрямую или с другого устройства (Instagram in-app браузер → Safari), метки нет. Защита: (1) сниппет темы хранит `ref` 7 дней в localStorage и пишет в атрибуты корзины; (2) кнопка ручной привязки в кабинете (`attribute_order_manual`); (3) доля «без креатора» — метрика здоровья атрибуции.
 
 ### 5.2 Алгоритм матча (на `order_paid`)
 
 ```
 1. Dedupe: Order.external_id уже есть → stop (idempotent).
 2. Собрать кандидатов-касаний за окно [attribution_window_days, default 7 — open в MVP_LOCK]:
-   a. PROMO: discount_codes ∩ PromoCode
-   b. LINK: ref/utm_content из landing_site или note_attributes → TrackedLink
-   c. PIXEL: checkout_completed с vf_token, совпавший order_id
-   d. MANUAL: ручная привязка
+   a. LINK: ref/utm_content из landing_site, landing_site_ref, note_attributes (_vf_ref), referring_site → TrackedLink;
+      иначе utm_campaign → Creator
+   b. PIXEL: checkout_completed с vf_token, совпавший order_id (v2)
+   c. KEYWORD / MANUAL: кодовое слово или ник в атрибутах заказа; ручная привязка в кабинете
+   d. (запасной) discount_codes ∩ внутренние ID LIKKY-{NICK}, если вдруг есть
 3. Отбросить: revoked токены, is_bot клики, fraud (self-order: customer_hash = хэш креатора; IP-шторм).
-4. Победитель = последнее по времени; при равенстве PROMO > LINK > PIXEL > KEYWORD > MANUAL.
-   Исключение: PROMO всегда побеждает, если код явно введён покупателем (сильнее cookie).
+4. Победитель = первый найденный по приоритету LINK > PIXEL > KEYWORD > MANUAL > (код скидки).
+   Нет сигналов → заказ «без креатора», событие order_unattributed → ручная привязка.
 5. Записать Conversion (order_id UK) + сохранить first_touch_id (самое раннее касание) для аналитики.
 6. post_id = из токена поста; если токен evergreen — из последнего DM/keyword этого фаната, если есть; иначе null.
 7. Commission: HELD, hold_until = ordered_at + hold_days [default 14, как clawback_days в DATA_MODEL].
@@ -388,7 +391,7 @@ erDiagram
 | Источник | Чем собираем | Куда | Частота |
 |---|---|---|---|
 | Каталог + COGS | Shopify export + ручной COGS | Sheet `products`, `offers` | при изменении |
-| Ссылки и клики | **редиректор** (Vercel function или Cloudflare Worker): `/c/{token}` → лог клика → 302 на discount link | Sheet `clicks` (через Apps Script webhook) или Supabase | real-time |
+| Ссылки и клики | **редиректор** (Supabase edge function `r`): `/r?s={slug}` → лог клика → 302 на страницу товара с `ref` | Sheet `clicks` (через Apps Script webhook) или Supabase | real-time |
 | Заказы и возвраты | Shopify Admin → Notifications → **Webhooks** `orders/paid`, `refunds/create`, `orders/cancelled` → тот же endpoint (HMAC) · fallback: ежедневный CSV-экспорт заказов | Sheet `orders`, `order_items`, `refunds` | real-time / daily |
 | Сессии | Shopify **Custom Pixel** (Settings → Customer events) → `/collect` | Sheet `sessions` (или пропустить day-1) | real-time |
 | Посты | креатор кидает permalink в форму/чат (`post_confirm`) | Sheet `posts` | при посте |
@@ -398,7 +401,7 @@ erDiagram
 | Расходы | Higgsfield `transactions`, Apify usage, сэмплы руками | Sheet `costs` | weekly |
 | Выплаты | Sheet `commissions`, `payouts` (формулы) | — | weekly (пятница) |
 
-**Реализовано (v1.1, 2026-10-08):** кабинет `/analytics` + инструкция `/guide` в репо `viralforge-sandbox` → https://kisa134.github.io/viralforge-sandbox/analytics/ . Переключатель источника **Демо / Мои CSV / База**: «Демо» — сгенерированный пример (помечен везде); «Мои CSV» — рабочее место в браузере (креаторы → промокод `LIKKY-НИК`, генератор Shopify discount-ссылок с utm/QR/текстом DM, импорт CSV заказов Shopify с атрибуцией по колонке Discount Code, правило выплаты фикс $/% заказа/% маржи с COGS, удержание 14 дн, «Отметить выплачено», бэкап JSON); «База» — Supabase-проект `wdvwinmsdkortvchkgxe`: миграции `supabase/migrations` (RLS только для email из `admins`, anon ничего не видит), edge-функции `r` (клик → `click` + `events` → 302) и `shopify-orders-webhook` (HMAC; заказ → атрибуция PROMO > LINK → conversion → commission HELD; возврат → VOID/CLAWBACK), вход по magic link. Шаги запуска для основателя — `docs/GO_LIVE.md`.
+**Реализовано (v1.2, 2026-10-08):** кабинет `/analytics` + инструкция `/guide` в репо `viralforge-sandbox` → https://kisa134.github.io/viralforge-sandbox/analytics/ . Переключатель источника **Демо / Мои CSV / База**. **Атрибуция только по ссылкам** (решение основателя: без кодов скидок): генератор даёт ссылку прямо на товар `likky.store/products/{handle}?ref={slug}&utm_*` (в «Базе» + короткая `…/functions/v1/r?s={slug}`, считает клики). «Мои CSV» — рабочее место в браузере: креаторы, ссылки с QR/DM, импорт CSV заказов Shopify (в экспорте нет источника → колонка `creator`/`ref` или ручной выбор креатора по заказу), правило выплаты фикс $/% заказа/% маржи с COGS, удержание 14 дн, «Отметить выплачено», бэкап JSON. «База» — Supabase `wdvwinmsdkortvchkgxe`: миграции `supabase/migrations` (RLS только для email из `admins`), edge-функции `r` (клик → `click` + `events` → 302 на товар) и `shopify-orders-webhook` (HMAC; `ref` из `landing_site`/`landing_site_ref`/`note_attributes`/`referring_site` → ссылка → креатор → conversion → commission HELD; возврат → VOID/CLAWBACK), функция `attribute_order_manual` для ручной привязки, вход по magic link. Шаги запуска — `docs/GO_LIVE.md` (включая сниппет темы, сохраняющий `ref` в атрибуты корзины).
 
 ### 8.2 v2 (после ≥ [X] активных креаторов или ≥ [X] заказов/нед)
 
@@ -413,14 +416,14 @@ erDiagram
 
 ## 9. MVP за 1 неделю (по порядку)
 
-1. **День 1.** Заполнить `products` (цена из Shopify, COGS `[X]` от основателя) и `offers` (правило выплаты `[X]`). Завести промокоды `LIKKY-{NICK}` в Shopify для первых креаторов.
+1. **День 1.** Заполнить `products` (цена из Shopify, COGS `[X]` от основателя) и `offers` (правило выплаты `[X]`). Коды скидок в Shopify не заводим (link-only); ID креаторов `LIKKY-{NICK}` — внутренние, для первых креаторов.
 2. **День 1.** Google Sheet с вкладками = таблицы §8.1 (имена колонок = поля DDL, чтобы потом залить в Postgres без маппинга).
-3. **День 2.** Редиректор `/c/{token}` (Vercel/Cloudflare) → лог клика → 302 на `likky.store/discount/{CODE}?redirect=/products/{handle}&utm_*&ref={token}`. Генератор ссылок: creator × offer × post.
+3. **День 2.** Редиректор `/c/{token}` (Vercel/Cloudflare) → лог клика → 302 на `likky.store/products/{handle}?ref={slug}&utm_*`. Генератор ссылок: creator × offer × post.
 4. **День 2.** Shopify webhooks `orders/paid`, `refunds/create`, `orders/cancelled` → endpoint → Sheet. Тестовый заказ по ссылке креатора (по `P1_TEST_ORDER_CHECKLIST.md`): код и `landing_site` дошли.
 5. **День 3.** Найм: на каждое объявление — уникальное стартовое слово («пиши ХОЧУ-[чат]») → вкладка `leads` со стадиями; скрипт ЛС из чата уже есть.
 6. **День 3.** Форма `post_confirm` для креаторов (permalink + keyword) → `posts`.
 7. **День 4.** Ежедневный Apify-снапшот метрик по списку permalink (бюджет `[X]` $/день — только после ОК основателя) + YT Data API.
-8. **День 4.** Атрибуция в Sheet/скрипте: PROMO → LINK → MANUAL; `conversions`, `commissions` (HELD, hold 14д).
+8. **День 4.** Атрибуция в Sheet/скрипте: LINK (ref) → MANUAL; `conversions`, `commissions` (HELD, hold 14д).
 9. **День 5.** Кабинет `/analytics`: CSV-импорт заказов и постов → 5 вкладок (Воронка, Ролики/Формулы, Креаторы, Финансы, Найм).
 10. **День 6.** Custom Pixel → `/collect` (сессии, ATC, checkout) — если успеваем; иначе неделя 2.
 11. **День 7.** Первая пятничная выплата по реестру + ретро: где рвётся цепочка ID, что автоматизировать в v2 (Supabase).
@@ -430,7 +433,7 @@ erDiagram
 ## 10. Открытые вопросы к основателю (меняют дизайн)
 
 1. **Правило выплаты:** фикс за продажу (`$[X]`) / % от чека / % от маржи (`до 15%`)? Если от маржи — нужны COGS + доставка по каждому SKU, и креаторам придётся показывать расчёт.
-2. **Скидка покупателю по коду креатора** (например −[X]%) — да/нет? Если да, ссылка сама применяет код и атрибуция почти не теряется в in-app браузерах.
+2. ~~Скидка по коду креатора~~ — **решено 2026-10-08: без кодов, только ссылки.** Открыто: кто поставит сниппет `ref` → атрибуты корзины в тему Shopify (нужен доступ Online Store → Themes → Edit code)? Без него теряются заказы «вернулся позже напрямую».
 3. **Гео покупателей vs аудитория креаторов:** магазин в USD (merchant country в настройках Shopify = IT), а креаторов ищем в RU-чатах. Куда магазин доставляет и какую аудиторию должны иметь аккаунты креаторов (US/EU/RU)? Влияет на офферы, валюту и фильтр трафика.
 4. **Рельсы и валюта выплат:** карта РФ (₽) / USDT / Wise / PayPal; минимальная сумма; фиксируем курс на дату выплаты?
 5. **Окно атрибуции и удержание:** 7 или 30 дней (открыто в MVP_LOCK); hold 14 дней от заказа или от доставки?

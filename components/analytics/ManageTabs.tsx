@@ -8,7 +8,7 @@ import { ORDERS_TEMPLATE, POSTS_TEMPLATE, parseCsv } from "@/lib/analytics/csv";
 import { LocalManageStore, type ManageStore } from "@/lib/analytics/manage";
 import { shortLink } from "@/lib/analytics/sbClient";
 import {
-  RULE_LABEL, buildDiscountLink, computeAccruals, loadWorkspace, nextPostCode, normalizeNick, promoCodeFor,
+  RULE_LABEL, buildProductLink, computeAccruals, loadWorkspace, nextPostCode, normalizeNick, promoCodeFor,
   type PayoutRule, type WsCreator, type WsLink, type WsSettings, type Workspace,
 } from "@/lib/analytics/workspace";
 import { COST_LABEL, DemoTag, Kpi, fmtDate, fmtN, fmtUsd } from "./AnalyticsTabs";
@@ -70,7 +70,7 @@ export function CreatorsManage({ store, ws, mine, act }: { store: ManageStore; w
     };
     await store.saveCreator(c);
     setF(EMPTY); setOpen(false);
-  }, `Креатор сохранён. Промокод ${promo} — создайте такой же код скидки в Shopify.`);
+  }, `Креатор сохранён. В его ссылках будет метка utm_campaign=${existing?.nick ?? nick}.`);
 
   const edit = (c: WsCreator) => {
     setOpen(true);
@@ -101,7 +101,7 @@ export function CreatorsManage({ store, ws, mine, act }: { store: ManageStore; w
               {f.rule && <label>{f.rule === "CPA_FIXED" ? "Сумма, $" : "Процент, %"}<input className="an-input" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} placeholder="задай сумму" /></label>}
               <label>Статус<select className="an-input" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value as CForm["status"] })}><option value="ACTIVE">активен</option><option value="PAUSED">на паузе</option></select></label>
             </div>
-            <div className="promo-preview">Промокод: <code className="promo-code">{promo}</code> {!f.id && <span className="dim">— создаётся автоматически из ника, потом не меняется. Создайте такой же код скидки в Shopify.</span>}</div>
+            <div className="promo-preview">ID креатора: <code className="promo-code">{promo}</code> <span className="dim">· в ссылках: <code>ref={(existing?.nick ?? nick) || "ник"}-1</code>, <code>utm_campaign={(existing?.nick ?? nick) || "ник"}</code>. Создаётся из ника автоматически, ничего заводить в Shopify не нужно.</span></div>
             <div className="btn-row">
               <button className="btn primary save-creator-btn" onClick={save}>Сохранить</button>
               <button className="btn" onClick={() => { setF(EMPTY); setOpen(false); }}>Отмена</button>
@@ -111,14 +111,14 @@ export function CreatorsManage({ store, ws, mine, act }: { store: ManageStore; w
       </div>
       <div className="an-card an-scroll">
         <table className="an-table creators-table">
-          <thead><tr><th>Ник</th><th>Промокод</th><th>Контакт</th><th>Соцсети</th><th>Правило выплаты</th><th className="num">Ссылок</th><th className="num">Заказов</th><th className="num">Начислено</th><th></th></tr></thead>
+          <thead><tr><th>Ник</th><th>ID</th><th>Контакт</th><th>Соцсети</th><th>Правило выплаты</th><th className="num">Ссылок</th><th className="num">Заказов</th><th className="num">Начислено</th><th></th></tr></thead>
           <tbody>
             {ws.creators.map((c) => {
               const st = stats.get(c.id);
               return (
                 <tr key={c.id} className={c.status === "PAUSED" ? "dimrow" : ""}>
                   <td>@{c.nick}{c.status === "PAUSED" && <span className="an-pill">пауза</span>}</td>
-                  <td><code>{c.promo_code}</code> <CopyBtn text={c.promo_code} label="⧉" /></td>
+                  <td className="dim"><code>{c.promo_code}</code></td>
                   <td className="dim">{c.contact || "—"}</td>
                   <td className="dim">{(["IG", "TT", "YT"] as const).filter((p) => c.handles[p]).map((p) => `${p} ${c.handles[p]}`).join(" · ") || "—"}</td>
                   <td>{c.payout_rule ? ruleText(c.payout_rule, c.payout_value) : <span className="dim">как в Настройках</span>}</td>
@@ -162,7 +162,7 @@ export function LinksTab({ store, ws, mine, act }: { store: ManageStore; ws: Wor
     if (ws.links.some((l) => l.code === c)) throw new Error(`Код поста ${c} уже есть — поменяйте`);
     const link: WsLink = {
       code: c, creator_id: creator.id, product_id: product.id, platform, keyword: keyword.trim().toUpperCase() || product.keyword,
-      url: buildDiscountLink(ws.settings.store_domain, creator.promo_code, product.handle, platform, creator.nick, c),
+      url: buildProductLink(ws.settings.store_domain, product.handle, c, platform, creator.nick),
       short_url: store.mode === "SUPABASE" ? shortLink(c) : null, permalink: null, created_at: new Date().toISOString(),
     };
     await store.saveLink(link);
@@ -170,8 +170,8 @@ export function LinksTab({ store, ws, mine, act }: { store: ManageStore; ws: Wor
   }, "Ссылка создана");
 
   const dm = (l: WsLink) => {
-    const c = ws.creators.find((x) => x.id === l.creator_id); const p = ws.products.find((x) => x.id === l.product_id);
-    return `Привет! Держи ссылку на ${p?.title ?? "товар"} 👉 ${l.short_url ?? l.url}\nПромокод ${c?.promo_code ?? ""} применится сам. #ad`;
+    const p = ws.products.find((x) => x.id === l.product_id);
+    return `Привет! Держи ссылку на ${p?.title ?? "товар"} 👉 ${l.short_url ?? l.url}\n#ad`;
   };
 
   return (
@@ -182,14 +182,14 @@ export function LinksTab({ store, ws, mine, act }: { store: ManageStore; ws: Wor
           <div className="an-card link-form">
             <h3>Новая ссылка</h3>
             <div className="form-grid">
-              <label>Креатор<select className="an-input" name="creator" value={creatorId} onChange={(e) => setCreatorId(e.target.value)}>{ws.creators.map((c) => <option key={c.id} value={c.id}>@{c.nick} · {c.promo_code}</option>)}</select></label>
+              <label>Креатор<select className="an-input" name="creator" value={creatorId} onChange={(e) => setCreatorId(e.target.value)}>{ws.creators.map((c) => <option key={c.id} value={c.id}>@{c.nick}</option>)}</select></label>
               <label>Товар<select className="an-input" name="product" value={productId} onChange={(e) => setProductId(e.target.value)}>{ws.products.map((p) => <option key={p.id} value={p.id}>{p.title} · {fmtUsd(p.price_cents)}</option>)}</select></label>
               <label>Платформа<select className="an-input" value={platform} onChange={(e) => setPlatform(e.target.value as Platform)}>{PLAT.map((p) => <option key={p} value={p}>{PLAT_LABEL[p]}</option>)}</select></label>
               <label>Кодовое слово<input className="an-input" value={keyword} onChange={(e) => setKeyword(e.target.value)} /></label>
               <label>Код поста (utm_content)<input className="an-input" name="postcode" value={code} onChange={(e) => setCode(e.target.value)} /></label>
             </div>
             <button className="btn primary gen-link-btn" onClick={generate}>🔗 Сгенерировать ссылку</button>
-            <div className="an-note">Ссылка = Shopify discount link: применяет промокод креатора и открывает товар. Работает, только если такой код скидки создан в Shopify.</div>
+            <div className="an-note">Ссылка ведёт прямо на страницу товара. Метка <code>ref</code> (= код поста) привязывает заказ к креатору: Shopify сохраняет её в <code>landing_site</code> заказа. {store.mode === "SUPABASE" ? "Короткая ссылка ещё и считает клики." : "В режиме «База» дополнительно будет короткая ссылка, которая считает клики."} Коды скидок не нужны.</div>
           </div>
           <div className="an-card link-result">
             <h3>Результат</h3>
@@ -232,6 +232,9 @@ export function LinksTab({ store, ws, mine, act }: { store: ManageStore; ws: Wor
   );
 }
 
+const methodLabel = (m: string | undefined, post: string | null, codes: string[]) =>
+  m === "LINK" ? `ссылка ${post ?? ""}`.trim() : m === "MANUAL" ? "вручную / колонка creator" : m === "KEYWORD" ? "кодовое слово" : m === "PROMO" ? `код скидки ${codes.join(", ")}` : m ?? "—";
+
 // ───────────────────────── Выплаты ─────────────────────────
 export function PayoutsTab({ d, demo, store, act }: { d: Dataset; demo: boolean; store: ManageStore; act: Act }) {
   const m = money(d);
@@ -271,17 +274,17 @@ export function PayoutsTab({ d, demo, store, act }: { d: Dataset; demo: boolean;
       <div className="an-card an-scroll">
         <div className="an-inline"><span>Комментарий к выплате (способ, № перевода):</span><input className="an-input" style={{ width: 280 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="карта / USDT TRC20 …" disabled={demo} /></div>
         <table className="an-table payouts-table">
-          <thead><tr><th>Креатор</th><th>Промокод</th><th className="num">Заказов</th><th className="num">К выплате</th><th className="num">На удержании</th><th>Освободится</th><th className="num">Без суммы</th><th className="num">Выплачено</th><th></th></tr></thead>
+          <thead><tr><th>Креатор</th><th className="num">Заказов</th><th className="num">К выплате</th><th className="num">На удержании</th><th>Освободится</th><th className="num">Без суммы</th><th className="num">Выплачено</th><th></th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td>{r.name}</td><td><code>{r.promo ?? "—"}</code></td><td className="num">{r.orders}</td>
+                <td>{r.name}</td><td className="num">{r.orders}</td>
                 <td className="num strong">{fmtUsd(r.approved)}</td><td className="num">{fmtUsd(r.held)}</td><td className="dim">{fmtDate(r.next)}</td>
                 <td className="num">{r.needs || ""}</td><td className="num">{fmtUsd(r.paid)}</td>
                 <td><button className="btn sm primary mark-paid-btn" disabled={demo || r.approved <= 0} title={demo ? "В DEMO недоступно" : ""} onClick={() => act(() => store.markPaid(r.id, r.approvedIds, r.approved, note), `Отмечено: выплачено ${fmtUsd(r.approved)}`)}>Отметить выплачено</button></td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={9} className="dim">Начислений пока нет. Импортируйте заказы Shopify на вкладке «Импорт».</td></tr>}
+            {!rows.length && <tr><td colSpan={8} className="dim">Начислений пока нет. Заказы: вкладка «Заказы / импорт».</td></tr>}
           </tbody>
         </table>
       </div>
@@ -304,7 +307,7 @@ export function PayoutsTab({ d, demo, store, act }: { d: Dataset; demo: boolean;
           <tbody>{d.commissions.slice().sort((a, b) => (orderName.get(b.conversion_order_id ?? "")?.ordered_at ?? "").localeCompare(orderName.get(a.conversion_order_id ?? "")?.ordered_at ?? "")).slice(0, 200).map((c) => {
             const o = orderName.get(c.conversion_order_id ?? "");
             const conv = d.conversions.find((x) => x.order_id === c.conversion_order_id);
-            return <tr key={c.id}><td>{o?.external_id ?? "—"}</td><td className="dim">{fmtDate(o?.ordered_at ?? null)}</td><td>{name.get(c.creator_id)}</td><td className="dim">{conv?.method === "PROMO" ? `промокод ${o?.discount_codes.join(", ")}` : conv?.method === "LINK" ? `ссылка ${conv.post_id ?? ""}` : conv?.method ?? "—"}</td><td className="num">{fmtUsd(o?.total_cents)}</td><td className="num">{c.needs_amount ? <span className="warn-text">{c.note ?? "задай сумму"}</span> : fmtUsd(c.amount_cents)}</td><td><span className={`st st-${c.status}`}>{({ HELD: "удержание", APPROVED: "к выплате", PAID: "выплачено", VOID: "аннулировано" } as Record<string, string>)[c.status]}</span></td><td className="dim">{fmtDate(c.hold_until ?? null)}</td></tr>;
+            return <tr key={c.id}><td>{o?.external_id ?? "—"}</td><td className="dim">{fmtDate(o?.ordered_at ?? null)}</td><td>{name.get(c.creator_id)}</td><td className="dim">{methodLabel(conv?.method, conv?.post_id ?? null, o?.discount_codes ?? [])}</td><td className="num">{fmtUsd(o?.total_cents)}</td><td className="num">{c.needs_amount ? <span className="warn-text">{c.note ?? "задай сумму"}</span> : fmtUsd(c.amount_cents)}</td><td><span className={`st st-${c.status}`}>{({ HELD: "удержание", APPROVED: "к выплате", PAID: "выплачено", VOID: "аннулировано" } as Record<string, string>)[c.status]}</span></td><td className="dim">{fmtDate(c.hold_until ?? null)}</td></tr>;
           })}{!d.commissions.length && <tr><td colSpan={8} className="dim">Нет начислений.</td></tr>}</tbody></table>
       </div>
     </section>
@@ -312,11 +315,28 @@ export function PayoutsTab({ d, demo, store, act }: { d: Dataset; demo: boolean;
 }
 
 // ───────────────────────── Импорт ─────────────────────────
-export function ImportTab({ store, ws, act }: { store: ManageStore; ws: Workspace; act: Act }) {
+function DbOrders({ d, ws, store, act }: { d: Dataset | null; ws: Workspace; store: ManageStore; act: Act }) {
+  const rows = (d?.orders ?? []).slice().sort((a, b) => b.ordered_at.localeCompare(a.ordered_at)).slice(0, 100);
+  return (
+    <div className="an-card an-scroll">
+      <h3>Заказы и привязка ({d?.orders.length ?? 0})</h3>
+      <table className="an-table recent-orders"><thead><tr><th>Заказ</th><th>Дата</th><th className="num">Сумма</th><th>Как привязан</th><th>Креатор (можно поменять)</th></tr></thead>
+        <tbody>{rows.map((o) => {
+          const conv = d!.conversions.find((c) => c.order_id === o.id);
+          return <tr key={o.id}><td>{o.external_id}</td><td className="dim">{fmtDate(o.ordered_at)}</td><td className="num">{fmtUsd(o.total_cents)}</td>
+            <td className="dim">{conv ? methodLabel(conv.method, conv.post_id, o.discount_codes) : "не привязан"}</td>
+            <td><select className="an-input assign-select" value={conv?.creator_id ?? ""} onChange={(e) => act(() => store.assignOrder(o.id, e.target.value || null), "Привязка обновлена")}>
+              <option value="">— органика / не привязан —</option>{ws.creators.map((c) => <option key={c.id} value={c.id}>@{c.nick}</option>)}</select></td></tr>;
+        })}{!rows.length && <tr><td colSpan={5} className="dim">Заказов пока нет — они появятся после настройки вебхука Shopify.</td></tr>}</tbody></table>
+    </div>
+  );
+}
+
+export function ImportTab({ store, ws, mine, act }: { store: ManageStore; ws: Workspace; mine: Dataset | null; act: Act }) {
   const [paste, setPaste] = useState("");
   const [result, setResult] = useState("");
   if (!(store instanceof LocalManageStore)) {
-    return <section><h2>Импорт</h2><div className="an-card">В режиме «База» заказы приходят автоматически вебхуком Shopify → функция <code>shopify-orders-webhook</code> (после настройки по <code>docs/GO_LIVE.md</code>). Загрузка CSV и бэкап — в режиме «Мои CSV».</div></section>;
+    return <section><h2>Заказы</h2><div className="an-card">В режиме «База» заказы приходят сами вебхуком Shopify → функция <code>shopify-orders-webhook</code> (настройка — <code>docs/GO_LIVE.md</code>). Привязка к креатору — по метке <code>ref</code> из его ссылки. Если метки нет (покупатель пришёл не по ссылке или потерял её) — выберите креатора вручную в таблице. Загрузка CSV и бэкап — в режиме «Мои CSV».</div><DbOrders d={mine} ws={ws} store={store} act={act} /></section>;
   }
   const local = store;
   const ingestOrders = (text: string) => act(() => {
@@ -325,7 +345,7 @@ export function ImportTab({ store, ws, act }: { store: ManageStore; ws: Workspac
     const r = local.importOrders(rows);
     const acc = computeAccruals(loadWorkspace());
     const attributed = acc.filter((a) => a.creator_id).length;
-    setResult(`Заказы: новых ${r.added}, обновлено ${r.updated}${r.skipped ? `, пропущено ${r.skipped} (нет даты)` : ""}. Всего в базе ${acc.length}, из них привязано к креаторам по промокоду/ссылке: ${attributed}, органика: ${acc.length - attributed}.`);
+    setResult(`Заказы: новых ${r.added}, обновлено ${r.updated}${r.skipped ? `, пропущено ${r.skipped} (нет даты)` : ""}. Всего в базе ${acc.length}, из них привязано к креаторам: ${attributed}, без привязки: ${acc.length - attributed}${acc.length - attributed ? " — выберите креатора вручную в таблице ниже" : ""}.`);
   }, "Заказы импортированы");
   const ingestPosts = (text: string) => act(() => {
     const rows = parseCsv(text);
@@ -334,7 +354,7 @@ export function ImportTab({ store, ws, act }: { store: ManageStore; ws: Workspac
     setResult(`Посты: загружено строк ${rows.length}. Метрики привяжутся к ссылкам по post_id (код поста) или URL поста.`);
   }, "Посты импортированы");
   const onFile = (fn: (t: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) f.text().then(fn); e.target.value = ""; };
-  const acc = computeAccruals(ws).slice().sort((a, b) => b.order.ordered_at.localeCompare(a.order.ordered_at)).slice(0, 15);
+  const acc = computeAccruals(ws).slice().sort((a, b) => b.order.ordered_at.localeCompare(a.order.ordered_at)).slice(0, 50);
   const nick = new Map(ws.creators.map((c) => [c.id, c.nick]));
   return (
     <section>
@@ -343,7 +363,7 @@ export function ImportTab({ store, ws, act }: { store: ManageStore; ws: Workspac
       <div className="an-grid2">
         <div className="an-card">
           <h3>Заказы Shopify (CSV) — в базе {ws.orders.length}</h3>
-          <p className="dim">Shopify Admin → Orders → Export → CSV. Привязка к креатору — по колонке <code>Discount Code</code> (= промокод креатора) или по <code>utm_content</code>/<code>ref</code> из Landing Site, если есть. Повторный импорт обновляет заказы, дублей не будет.</p>
+          <p className="dim">Shopify Admin → Orders → Export → CSV. В экспорте Shopify нет источника заказа, поэтому привязка: колонка <code>creator</code> (ник) или <code>ref</code> (код поста), если вы её добавили, — иначе выберите креатора вручную в таблице ниже. Повторный импорт обновляет заказы и сохраняет ручную привязку, дублей не будет.</p>
           <input type="file" accept=".csv,text/csv" className="orders-file" onChange={onFile(ingestOrders)} />
           <div className="btn-row">
             <button className="btn" onClick={() => download("shopify_orders_template.csv", ORDERS_TEMPLATE)}>Шаблон</button>
@@ -371,9 +391,13 @@ export function ImportTab({ store, ws, act }: { store: ManageStore; ws: Workspac
       {result && <div className="an-warn import-result">{result}</div>}
       <div className="an-card an-scroll">
         <h3>Последние заказы и привязка</h3>
-        <table className="an-table recent-orders"><thead><tr><th>Заказ</th><th>Дата</th><th className="num">Сумма</th><th>Промокод</th><th>Креатор</th><th className="num">Начисление</th></tr></thead>
-          <tbody>{acc.map((a) => <tr key={a.id}><td>{a.order.external_id}</td><td className="dim">{fmtDate(a.order.ordered_at)}</td><td className="num">{fmtUsd(a.order.total_cents)}</td><td><code>{a.order.discount_codes.join(", ") || "—"}</code></td><td>{a.creator_id ? `@${nick.get(a.creator_id)} (${a.method === "PROMO" ? "промокод" : "ссылка"})` : <span className="dim">органика</span>}</td><td className="num">{a.creator_id ? (a.amount_cents === null ? <span className="warn-text">{a.reason}</span> : fmtUsd(a.amount_cents)) : "—"}</td></tr>)}
-            {!acc.length && <tr><td colSpan={6} className="dim">Заказов нет.</td></tr>}</tbody></table>
+        <table className="an-table recent-orders"><thead><tr><th>Заказ</th><th>Дата</th><th className="num">Сумма</th><th>Креатор</th><th>Как привязан</th><th>Привязать вручную</th><th className="num">Начисление</th></tr></thead>
+          <tbody>{acc.map((a) => <tr key={a.id}><td>{a.order.external_id}</td><td className="dim">{fmtDate(a.order.ordered_at)}</td><td className="num">{fmtUsd(a.order.total_cents)}</td>
+            <td>{a.creator_id ? `@${nick.get(a.creator_id)}` : <span className="dim">органика</span>}</td><td className="dim">{a.how}</td>
+            <td><select className="an-input assign-select" value={a.order.manual_creator_id ?? ""} onChange={(e) => act(() => local.assignOrder(a.order.external_id, e.target.value || null), "Привязка обновлена")}>
+              <option value="">авто (ref / creator)</option><option value="none">органика</option>{ws.creators.map((c) => <option key={c.id} value={c.id}>@{c.nick}</option>)}</select></td>
+            <td className="num">{a.creator_id ? (a.amount_cents === null ? <span className="warn-text">{a.reason}</span> : fmtUsd(a.amount_cents)) : "—"}</td></tr>)}
+            {!acc.length && <tr><td colSpan={7} className="dim">Заказов нет.</td></tr>}</tbody></table>
       </div>
       <div className="an-card">
         <h3>Бэкап</h3>
@@ -415,7 +439,7 @@ export function SettingsTab({ store, ws, act }: { store: ManageStore; ws: Worksp
           <label>Домен магазина<input className="an-input" value={domain} onChange={(e) => setDomain(e.target.value)} /></label>
         </div>
         {value.trim() === "" && <div className="an-warn">Сумма не задана — начисления показываются как «задай сумму». Цифру решаете вы; в спеке она открытый вопрос.</div>}
-        <div className="an-note">Окно атрибуции применяется в режиме «База» к кликам по коротким ссылкам. В режиме «Мои CSV» заказ привязывается по промокоду/метке прямо в заказе — это прямое доказательство, окно не нужно. Креатору можно задать своё правило на вкладке «Креаторы».</div>
+        <div className="an-note">Окно атрибуции применяется в режиме «База» к кликам по коротким ссылкам. В режиме «Мои CSV» заказ привязывается по колонке creator/ref в CSV или вручную — окно не применяется. Креатору можно задать своё правило на вкладке «Креаторы».</div>
         <div className="btn-row"><button className="btn primary save-settings-btn" onClick={save}>Сохранить настройки</button></div>
       </div>
       <div className="an-card an-scroll">

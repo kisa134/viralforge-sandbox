@@ -1,6 +1,6 @@
 # Запуск живой аналитики Likky × ViralForge (GO LIVE)
 
-Обновлено: 08.10.2026. Кабинет: https://kisa134.github.io/viralforge-sandbox/analytics/ · Инструкция: https://kisa134.github.io/viralforge-sandbox/guide/
+Обновлено: 08.10.2026 (атрибуция только по ссылкам — коды скидок Shopify не используются). Кабинет: https://kisa134.github.io/viralforge-sandbox/analytics/ · Инструкция: https://kisa134.github.io/viralforge-sandbox/guide/
 
 ## Что уже работает (сделано за вас)
 
@@ -9,8 +9,9 @@
 | База Supabase `viralforge-analytics` (ref `wdvwinmsdkortvchkgxe`, us-east-1) | ✅ создана, схема и миграции применены (`supabase/migrations/`) |
 | Защита данных (RLS) | ✅ все таблицы закрыты: публичный ключ **ничего не читает и не пишет**. Доступ только у вошедших пользователей, чей email есть в таблице `admins`. Security Advisor: 0 замечаний |
 | Каталог | ✅ бренд Likky (Shopify) + 5 товаров с ценами + по офферу на товар. **COGS пустые** — заполните в «Настройках» |
-| Функция `r` (короткие ссылки, считает клики) | ✅ работает: `https://wdvwinmsdkortvchkgxe.supabase.co/functions/v1/r?s=<код>` → пишет клик → 302 на Shopify-ссылку со скидкой (+`ref=<код>`). Проверено тестовой ссылкой, тестовые строки удалены |
-| Функция `shopify-orders-webhook` | ✅ задеплоена, проверяет подпись Shopify (HMAC). **Пока секрет не задан — отвечает 401 на всё** (так и задумано) |
+| Функция `r` (короткие ссылки, считает клики) | ✅ работает: `https://wdvwinmsdkortvchkgxe.supabase.co/functions/v1/r?s=<код>` → пишет клик → 302 прямо на страницу товара `likky.store/products/<handle>?ref=<код>&utm_…`. Проверено тестовой ссылкой, тестовые строки удалены |
+| Функция `shopify-orders-webhook` | ✅ задеплоена, проверяет подпись Shopify (HMAC). Привязка заказа — по `ref` из ссылки креатора. **Пока секрет не задан — отвечает 401 на всё** (так и задумано) |
+| Ручная привязка | ✅ заказ без метки можно привязать к креатору в кабинете (функция БД `attribute_order_manual`, только для админов) |
 | Кабинет: переключатель **Демо / Мои CSV / База** | ✅ «Демо» — пример; «Мои CSV» — ваши данные в браузере без входа; «База» — живой режим, вход по ссылке на email |
 
 ## Что нужно сделать вам (≈ 20 минут)
@@ -36,12 +37,7 @@ Supabase → **Authentication → URL Configuration**:
 Без этого ссылка из письма уведёт на `localhost`.
 Отключать регистрацию не обязательно: посторонний может получить ссылку для входа, но ничего не увидит (его нет в `admins`). Бесплатная почта Supabase шлёт лишь несколько писем в час; для команды подключите свой SMTP (Authentication → Emails → SMTP Settings).
 
-### 3. Промокоды в Shopify (обязательно для атрибуции)
-
-Для каждого креатора кабинет показывает код вида `LIKKY-НИК`. Тот же код нужно создать в Shopify:
-**Shopify Admin → Discounts → Create discount → Amount off products / order → Discount code = `LIKKY-НИК`** (размер скидки для покупателя — на ваше усмотрение: [X]%). Без кода в Shopify ссылка `likky.store/discount/LIKKY-НИК` не применит скидку и заказ не привяжется по промокоду (останется привязка по `ref`/`utm_content`).
-
-### 4. Вебхук заказов Shopify → Supabase (≈ 5 минут)
+### 3. Вебхук заказов Shopify → Supabase (≈ 5 минут)
 
 1. **Shopify Admin → Settings → Notifications → Webhooks** (внизу страницы) → **Create webhook**, создать 5 штук, формат **JSON**, версия API — последняя:
    - `Order creation` → URL: `https://wdvwinmsdkortvchkgxe.supabase.co/functions/v1/shopify-orders-webhook`
@@ -58,17 +54,51 @@ Supabase → **Authentication → URL Configuration**:
 
 > Если вы создаёте вебхук через **приложение** (Settings → Apps → Develop apps), ключ подписи = **API secret key** этого приложения — его и кладите в `SHOPIFY_WEBHOOK_SECRET`.
 
-Что делает функция: сохраняет заказ (сумма в центах, статус, хэш покупателя, landing_site, коды скидок, позиции), привязывает к креатору — сначала по **промокоду** (`LIKKY-НИК`), иначе по `ref`/`utm_content` из ссылки; создаёт начисление по правилу из «Настроек» (фикс $ / % от заказа / % от маржи) со статусом «удержание» на `hold_days` (по умолчанию 14). Возврат/отмена → начисление аннулируется, а если уже выплачено — создаётся отрицательная строка CLAWBACK. Если сумма за продажу не задана («задай сумму») или для «% от маржи» нет COGS — заказ привязывается, а начисление ждёт (событие `commission_needs_amount`).
+Что делает функция: сохраняет заказ (сумма в центах, статус, хэш покупателя, `landing_site`, `landing_site_ref`, атрибуты корзины, позиции) и привязывает к креатору **по ссылке**:
+1. `ref` (код поста) из `landing_site` (адрес первого захода в магазин), `landing_site_ref`, атрибутов корзины/заказа (`_vf_ref`, `ref`) или `referring_site` → ссылка → креатор;
+2. иначе `utm_content` / `utm_campaign` (ник креатора) из тех же мест;
+3. иначе кодовое слово или ник креатора в атрибутах заказа (`_vf_keyword`, `creator`);
+4. код скидки — только запасной вариант, если в заказе вдруг окажется код вида `LIKKY-НИК` (заводить их не нужно);
+5. ничего нет → заказ «без креатора» (событие `order_unattributed`); привяжите вручную: кабинет → «База» → **Заказы / импорт** → выбрать креатора.
 
-### 5. Задать деньги (в кабинете, 2 минуты)
+Начисление считается по правилу из «Настроек» (фикс $ / % от заказа / % от маржи) со статусом «удержание» на `hold_days` (по умолчанию 14). Возврат/отмена → начисление аннулируется, а если уже выплачено — создаётся отрицательная строка CLAWBACK. Если сумма не задана («задай сумму») или для «% от маржи» нет COGS — заказ привязывается, а начисление ждёт (событие `commission_needs_amount`).
+
+> Ограничение: `landing_site` — это первая страница **того визита, в котором оформлен заказ**. Если покупатель пришёл по ссылке, ушёл и вернулся через день напрямую, метки в заказе не будет. Это закрывает сниппет из п. 6 (метка сохраняется в браузере на 7 дней и кладётся в атрибуты корзины).
+
+### 4. Задать деньги (в кабинете, 2 минуты)
 
 Кабинет → **База** → войти → **Настройки**: правило выплаты и сумму (поле «задай сумму»), удержание (14 дн), окно атрибуции (7 дн), COGS по каждому товару. Это записывается в `app_settings` / `product` и сразу используется вебхуком.
 
-### 6. Пиксели (рекомендуется, 10 минут)
+### 5. Пиксели (рекомендуется, 10 минут)
 
 - **Meta (Instagram):** Shopify Admin → Sales channels → **Facebook & Instagram** → Data sharing → Maximum (Pixel + Conversions API).
 - **TikTok:** установить приложение **TikTok** в Shopify → Data sharing → Maximum.
-- Это не нужно для начислений креаторам (они идут по промокоду/ссылке), но нужно для рекламы и для сверки воронки.
+- Это не нужно для начислений креаторам (они идут по ссылке), но нужно для рекламы и для сверки воронки.
+
+### 6. Сохранять `ref` в корзину (рекомендуется; нужен доступ к теме Shopify)
+
+Мы не можем править тему без админ-доступа, поэтому это — готовый сниппет для вас или разработчика. Он запоминает метку из ссылки креатора на 7 дней (окно атрибуции) и записывает её в **атрибуты корзины** — Shopify переносит их в заказ (`note_attributes`), и вебхук привяжет заказ, даже если покупатель вернулся позже напрямую. Атрибуты с `_` в начале покупателю на чекауте не показываются.
+
+Shopify Admin → **Online Store → Themes → … → Edit code → `layout/theme.liquid`** → вставить перед `</body>`:
+
+```html
+<script>
+(function () {
+  var KEY = 'vf_ref', DAYS = 7, p = new URLSearchParams(location.search), ref = p.get('ref');
+  if (ref && /^[A-Za-z0-9_-]{1,64}$/.test(ref)) {
+    localStorage.setItem(KEY, JSON.stringify({ ref: ref, c: p.get('utm_campaign') || '', u: p.get('utm_content') || '', t: Date.now() }));
+  }
+  var s; try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+  if (!s || Date.now() - s.t > DAYS * 864e5 || sessionStorage.getItem('vf_ref_sent') === s.ref) return;
+  fetch('/cart/update.js', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attributes: { _vf_ref: s.ref, _vf_utm_campaign: s.c, _vf_utm_content: s.u } })
+  }).then(function () { sessionStorage.setItem('vf_ref_sent', s.ref); });
+})();
+</script>
+```
+
+Проверка: откройте `https://likky.store/products/<handle>?ref=test-1`, затем `https://likky.store/cart.js` — в `attributes` должно быть `"_vf_ref": "test-1"`. Последний клик побеждает (новая ссылка перезаписывает метку).
 
 ### 7. Ежедневное подтверждение удержаний (по желанию)
 
@@ -80,9 +110,9 @@ select cron.schedule('approve-matured', '0 5 * * *', $$select public.approve_mat
 
 ## Как пользоваться каждый день
 
-1. **Креаторы** → «Добавить» → ник, контакт, соцсети → код `LIKKY-НИК` (создайте его в Shopify, п. 3).
-2. **Ссылки** → креатор + товар + платформа → «Сгенерировать» → в режиме «База» получаете короткую ссылку `…/functions/v1/r?s=ник-1` (считает клики) + полную Shopify-ссылку, QR и текст для DM.
-3. Заказы приходят сами (вебхук). Вкладки **Воронка / Креаторы / Выплаты** обновляются при открытии.
+1. **Креаторы** → «Добавить» → ник, контакт, соцсети. В Shopify ничего заводить не нужно.
+2. **Ссылки** → креатор + товар + платформа → «Сгенерировать» → ссылка прямо на товар `likky.store/products/<handle>?ref=<ник-N>&utm_…`; в режиме «База» ещё короткая `…/functions/v1/r?s=<ник-N>` (считает клики), QR и текст для DM. Каждому посту — своя ссылка.
+3. Заказы приходят сами (вебхук) и привязываются по `ref`. Заказы «без креатора» — вкладка **Заказы / импорт** → выбрать креатора вручную.
 4. Пятница: **Выплаты** → «К выплате» → перевели деньги → «Отметить выплачено».
 
 ## Режимы данных
@@ -90,10 +120,10 @@ select cron.schedule('approve-matured', '0 5 * * *', $$select public.approve_mat
 | Режим | Где данные | Вход | Для чего |
 |---|---|---|---|
 | **Демо** | генерируются в браузере | нет | посмотреть, как всё устроено. Цифры выдуманы |
-| **Мои CSV** | localStorage этого браузера | нет | работать без базы: креаторы, ссылки, загрузка CSV заказов Shopify (Orders → Export), выплаты, бэкап JSON |
+| **Мои CSV** | localStorage этого браузера | нет | работать без базы: креаторы, ссылки, загрузка CSV заказов Shopify (Orders → Export). В экспорте Shopify нет источника заказа → привязка по колонке `creator`/`ref` (если дописали) или вручную в таблице. Выплаты, бэкап JSON |
 | **База** | Supabase | ссылка на email + email в `admins` | живой режим: клики через `r`, заказы через вебхук, общие данные для всех админов |
 
-Данные «Мои CSV» и «База» не смешиваются. Перенос из CSV в базу пока вручную (создать тех же креаторов в режиме «База» — промокоды совпадут).
+Данные «Мои CSV» и «База» не смешиваются. Перенос из CSV в базу пока вручную (создать тех же креаторов в режиме «База»).
 
 ## Полезные SQL (Supabase → SQL Editor)
 
@@ -101,9 +131,9 @@ select cron.schedule('approve-matured', '0 5 * * *', $$select public.approve_mat
 -- последние клики
 select clicked_at at time zone 'Asia/Dubai' as dubai, token, is_bot, referer from click order by clicked_at desc limit 50;
 -- заказы и кому привязаны
-select o.name, o.ordered_at at time zone 'Asia/Dubai' as dubai, o.total_cents/100.0 as total, o.discount_codes, cv.method, c.display_name
+select o.name, o.ordered_at at time zone 'Asia/Dubai' as dubai, o.total_cents/100.0 as total, o.ref, o.landing_site, cv.method, c.display_name
 from "order" o left join conversion cv on cv.order_id = o.id left join creator c on c.id = cv.creator_id order by o.ordered_at desc limit 50;
--- события вебхука (ошибки атрибуции, «задай сумму»)
+-- события вебхука (order_unattributed = заказ без метки, commission_needs_amount = «задай сумму»)
 select occurred_at, name, props from events where source = 'shopify:webhook' order by occurred_at desc limit 50;
 -- удалить тестовый заказ Shopify (подставьте external_id)
 -- delete from commission where idempotency_key = 'cpa:EXTERNAL_ID';
@@ -114,7 +144,7 @@ select occurred_at, name, props from events where source = 'shopify:webhook' ord
 
 ## Техническое
 
-- Миграции: `supabase/migrations/20261008090000_analytics_schema.sql` (таблицы/вьюхи), `…090100_rls_auth.sql` (admins, `private.is_admin()`, RLS «admin_all» на всех таблицах, `security_invoker` на вьюхах, отзыв прав у `anon`), `…090200_seed_likky.sql` (бренд/товары/офферы).
+- Миграции: `supabase/migrations/20261008090000_analytics_schema.sql` (таблицы/вьюхи), `…090100_rls_auth.sql` (admins, `private.is_admin()`, RLS «admin_all» на всех таблицах, `security_invoker` на вьюхах, отзыв прав у `anon`), `…090200_seed_likky.sql` (бренд/товары/офферы), `…100000_link_only_attribution.sql` (`order.landing_site_ref`, `order.ref`, функция `attribute_order_manual(order, creator)` — ручная привязка/отвязка, только админ). Таблица `promo_code` осталась как внутренний ID креатора `LIKKY-НИК` — в Shopify её коды заводить не нужно.
 - Функции: `supabase/functions/r`, `supabase/functions/shopify-orders-webhook` (обе `verify_jwt = false`: `r` публичная, вебхук защищён HMAC). Деплой из репо: `supabase functions deploy r --no-verify-jwt` и `supabase functions deploy shopify-orders-webhook --no-verify-jwt`.
 - Сайт: GitHub Pages собирается с секретами репо `NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_ANON_KEY` (публичный publishable-ключ — его видно в браузере, это нормально: без строки в `admins` он ничего не даёт).
 - Клики ботов/превью (Telegram, WhatsApp, curl и т.п.) пишутся с `is_bot = true` и не считаются в воронке.

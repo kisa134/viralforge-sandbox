@@ -156,13 +156,13 @@ export function generateDemo(now = Date.now()): Dataset {
           const ot = posted + between(0.05, Math.min(6, Math.max(0.1, ageDays))) * DAY;
           if (ot > now) continue;
           const qty = r() < 0.18 ? 2 : 1;
-          const usePromo = r() < 0.55;
-          const discount = usePromo ? Math.round(prod.price_cents * qty * 0.1) : 0;
+          const viaLink = r() < 0.85; // link-only attribution: ref from the creator link; rest = manual / keyword
+          const discount = 0;
           const sub = prod.price_cents * qty;
           const id = `or_${++orderSeq}`;
-          d.orders.push({ id, external_id: `#D${1000 + orderSeq}`, ordered_at: iso(ot), subtotal_cents: sub, discount_cents: discount, total_cents: sub - discount, discount_codes: usePromo ? [c.promo_code!] : [], is_sandbox: true });
+          d.orders.push({ id, external_id: `#D${1000 + orderSeq}`, ordered_at: iso(ot), subtotal_cents: sub, discount_cents: discount, total_cents: sub - discount, discount_codes: [], is_sandbox: true });
           d.order_items.push({ order_id: id, product_id: prod.id, title: prod.title, qty, price_cents: prod.price_cents, cogs_cents: prod.cogs_cents });
-          d.conversions.push({ order_id: id, creator_id: c.id, post_id: post.id, offer_id: offer.id, method: usePromo ? "PROMO" : r() < 0.85 ? "LINK" : "PIXEL" });
+          d.conversions.push({ order_id: id, creator_id: c.id, post_id: post.id, offer_id: offer.id, method: viaLink ? "LINK" : r() < 0.6 ? "MANUAL" : "KEYWORD" });
           const refunded = r() < 0.05;
           if (refunded) d.refunds.push({ order_id: id, amount_cents: sub - discount, created_at: iso(Math.min(now, ot + between(1, 10) * DAY)), type: "REFUND" });
           const margin = sub - discount - (prod.cogs_cents ?? 0) * qty;

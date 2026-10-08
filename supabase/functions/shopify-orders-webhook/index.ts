@@ -1,5 +1,6 @@
 // Shopify webhooks → orders / refunds / attribution / commissions.
 // POST /functions/v1/shopify-orders-webhook   (verify_jwt = false; authenticity = X-Shopify-Hmac-Sha256)
+// Attribution is link-only (ref from landing_site / note_attributes); Shopify discount codes are NOT required.
 // Topics: orders/create, orders/paid, orders/updated, orders/cancelled, refunds/create.
 // Until the SHOPIFY_WEBHOOK_SECRET secret is set, EVERY request is rejected with 401.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -52,22 +53,37 @@ function mapStatus(o: R): string {
   return o.cancelled_at ? "VOIDED" : "PENDING";
 }
 
-function refFromLanding(landing: string | null | undefined): { ref: string | null; utm_content: string | null } {
-  if (!landing) return { ref: null, utm_content: null };
+const SLUG_RE = /^[A-Za-z0-9_-]{1,64}$/;
+function paramsOf(url: string | null | undefined): URLSearchParams[] {
+  if (!url) return [];
   try {
-    const u = new URL(landing, "https://likky.store");
-    let ref = u.searchParams.get("ref");
-    let utm = u.searchParams.get("utm_content");
-    const redir = u.searchParams.get("redirect"); // /discount/CODE?redirect=/products/x?ref=...
-    if (redir && (!ref || !utm)) {
-      const r = new URL(redir, "https://likky.store");
-      ref = ref ?? r.searchParams.get("ref");
-      utm = utm ?? r.searchParams.get("utm_content");
-    }
-    return { ref, utm_content: utm };
-  } catch {
-    return { ref: null, utm_content: null };
+    const u = new URL(url, "https://likky.store");
+    const out = [u.searchParams];
+    const redir = u.searchParams.get("redirect"); // legacy /discount/CODE?redirect=/products/x?ref=...
+    if (redir) out.push(new URL(redir, "https://likky.store").searchParams);
+    return out;
+  } catch { return []; }
+}
+/** Collects ref / utm signals from every place Shopify may keep them. */
+function attributionSignals(o: R) {
+  const refs: string[] = [], utmContents: string[] = [];
+  let campaign: string | null = null;
+  const add = (arr: string[], v: unknown) => { const t = String(v ?? "").trim(); if (t && SLUG_RE.test(t) && !arr.includes(t)) arr.push(t); };
+  for (const src of [o.landing_site, o.referring_site]) {
+    for (const p of paramsOf(src)) { add(refs, p.get("ref")); add(utmContents, p.get("utm_content")); campaign = campaign ?? p.get("utm_campaign"); }
   }
+  add(refs, o.landing_site_ref);
+  const notes: R[] = Array.isArray(o.note_attributes) ? o.note_attributes : [];
+  const note = (...names: string[]) => notes.find((n) => names.includes(String(n.name ?? "").toLowerCase()))?.value ?? null;
+  add(refs, note("ref", "vf_ref", "_vf_ref"));
+  add(utmContents, note("utm_content", "_vf_utm_content"));
+  campaign = campaign ?? note("utm_campaign", "_vf_utm_campaign");
+  return {
+    refs, utmContents,
+    campaign: campaign && SLUG_RE.test(campaign) ? campaign : null,
+    keyword: (() => { const k = String(note("keyword", "_vf_keyword") ?? "").trim(); return k && SLUG_RE.test(k) ? k : null; })(),
+    creator: (() => { const c = String(note("creator", "_vf_creator") ?? "").trim().replace(/^@/, ""); return c && SLUG_RE.test(c) ? c : null; })(),
+  };
 }
 
 async function settings(): Promise<R> {
@@ -114,7 +130,7 @@ async function handleOrder(o: R, topic: string) {
     currency: o.currency ?? "USD", subtotal_cents: cents(o.subtotal_price ?? o.total_line_items_price),
     discount_cents: cents(o.total_discounts), shipping_cents: cents(o.total_shipping_price_set?.shop_money?.amount),
     tax_cents: cents(o.total_tax), total_cents: cents(o.total_price), financial_status: status,
-    customer_hash: customerHash, landing_site: o.landing_site ?? null, referring_site: o.referring_site ?? null,
+    customer_hash: customerHash, landing_site: o.landing_site ?? null, landing_site_ref: o.landing_site_ref ?? null, referring_site: o.referring_site ?? null,
     discount_codes: codes, note_attributes: o.note_attributes ?? null,
   };
   const saved = unwrap(await db.from("order").upsert(row, { onConflict: "external_id" }).select("id, is_first_order").single(), "order upsert") as R;
@@ -146,23 +162,36 @@ async function handleOrder(o: R, topic: string) {
   const existing = unwrap(await db.from("conversion").select("id").eq("order_id", orderId).maybeSingle(), "conv lookup");
   if (existing) return { orderId, attributed: "already" };
 
-  let method: "PROMO" | "LINK" | null = null;
+  // Link-only attribution. Priority: ref/utm_content (landing_site, landing_site_ref, note/cart attributes, referring_site)
+  // → tracked link → creator; then utm_campaign (creator nick); then keyword / creator note attribute; discount code only as optional fallback.
+  let method: "LINK" | "KEYWORD" | "MANUAL" | "PROMO" | null = null;
   let creatorId: string | null = null, offerId: string | null = null, token: string | null = null, postId: string | null = null;
-  if (codes.length) {
+  const sig = attributionSignals(o);
+  for (const tok of [...sig.refs, ...sig.utmContents]) {
+    let link = unwrap(await db.from("tracked_link").select("*").eq("token", tok).maybeSingle(), "link by ref") as R | null;
+    if (!link) link = unwrap(await db.from("tracked_link").select("*").eq("utm_content", tok).limit(1).maybeSingle(), "link by utm") as R | null;
+    if (link) { method = "LINK"; creatorId = link.creator_id; offerId = link.offer_id; token = link.token; postId = link.post_id; break; }
+  }
+  if (!method && sig.campaign) {
+    const c = unwrap(await db.from("creator").select("id").eq("display_name", sig.campaign.toLowerCase()).limit(1).maybeSingle(), "creator by utm_campaign") as R | null;
+    if (c) { method = "LINK"; creatorId = c.id; }
+  }
+  if (!method && sig.keyword) {
+    const ls = unwrap(await db.from("tracked_link").select("creator_id, offer_id, token").eq("keyword", sig.keyword.toUpperCase()).is("revoked_at", null).limit(5), "link by keyword") as R[];
+    const creators = new Set(ls.map((l) => l.creator_id));
+    if (creators.size === 1) { method = "KEYWORD"; creatorId = ls[0].creator_id; offerId = ls[0].offer_id; }
+  }
+  if (!method && sig.creator) {
+    const c = unwrap(await db.from("creator").select("id").eq("display_name", sig.creator.toLowerCase()).limit(1).maybeSingle(), "creator by note") as R | null;
+    if (c) { method = "MANUAL"; creatorId = c.id; }
+  }
+  if (!method && codes.length) {
     const promos = unwrap(await db.from("promo_code").select("code, creator_id, offer_id, status").in("code", codes), "promo") as R[];
     const p = promos.find((x) => x.status === "ACTIVE") ?? promos[0];
     if (p) { method = "PROMO"; creatorId = p.creator_id; offerId = p.offer_id; }
   }
-  if (!method) {
-    const { ref, utm_content } = refFromLanding(o.landing_site);
-    const noteRef = ((o.note_attributes ?? []) as R[]).find((n) => n.name === "ref")?.value ?? null;
-    const slug = ref ?? noteRef;
-    let link: R | null = null;
-    if (slug) link = unwrap(await db.from("tracked_link").select("*").eq("token", slug).maybeSingle(), "link by ref") as R | null;
-    if (!link && utm_content) link = unwrap(await db.from("tracked_link").select("*").eq("utm_content", utm_content).limit(1).maybeSingle(), "link by utm") as R | null;
-    if (link) { method = "LINK"; creatorId = link.creator_id; offerId = link.offer_id; token = link.token; postId = link.post_id; }
-  }
-  if (!method || !creatorId) { await logEvent("order_unattributed", { order_id: orderId, external_id: externalId, topic, codes }); return { orderId, attributed: false }; }
+  await db.from("order").update({ ref: token ?? sig.refs[0] ?? null }).eq("id", orderId);
+  if (!method || !creatorId) { await logEvent("order_unattributed", { order_id: orderId, external_id: externalId, topic, landing_site: o.landing_site ?? null, signals: sig }); return { orderId, attributed: false }; } // founder assigns manually in the cabinet
 
   if (!offerId) {
     const pid = items.find((i) => i.product_id)?.product_id;
@@ -170,8 +199,8 @@ async function handleOrder(o: R, topic: string) {
   }
 
   const touch = unwrap(await db.from("attribution_touch").insert({
-    type: method === "PROMO" ? "PROMO" : "LINK_CLICK", creator_id: creatorId, offer_id: offerId, post_id: postId, token,
-    order_id: orderId, occurred_at: orderedAt, raw: { codes, landing_site: o.landing_site ?? null, topic },
+    type: method === "LINK" ? "LINK_CLICK" : method, creator_id: creatorId, offer_id: offerId, post_id: postId, token,
+    order_id: orderId, occurred_at: orderedAt, raw: { codes, landing_site: o.landing_site ?? null, landing_site_ref: o.landing_site_ref ?? null, referring_site: o.referring_site ?? null, signals: sig, topic },
   }).select("id").single(), "touch") as R;
   const conv = unwrap(await db.from("conversion").upsert({
     order_id: orderId, touch_id: touch.id, creator_id: creatorId, offer_id: offerId, post_id: postId,

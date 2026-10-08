@@ -11,5 +11,5 @@ export function sb(): SupabaseClient | null {
   if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, detectSessionInUrl: true } });
   return client;
 }
-/** Short tracked link (База mode only) served by the `r` edge function (logs the click, then 302 to the Shopify discount link). */
+/** Short tracked link (База mode only) served by the `r` edge function (logs the click, then 302 to the product page with ?ref=). */
 export const shortLink = (token: string) => (supabaseConfigured ? `${SUPABASE_URL}/functions/v1/r?s=${encodeURIComponent(token)}` : null);

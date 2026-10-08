@@ -268,6 +268,7 @@ create table post_metrics_snapshot (
 );
 create index pms_post_time on post_metrics_snapshot (post_id, captured_at desc);
 
+-- Internal creator slug LIKKY-<NICK>; NOT required in Shopify (attribution is link-only). Optional fallback only.
 create table promo_code (
   code                 text primary key,
   creator_id           uuid not null references creator(id),
@@ -353,6 +354,8 @@ create table "order" (
   customer_hash     text,
   is_first_order    boolean,
   landing_site      text,
+  landing_site_ref  text,                         -- Shopify landing_site_ref (value of ?ref=)
+  ref               text,                         -- resolved tracked_link slug (link-only attribution)
   referring_site    text,
   discount_codes    text[] default '{}',
   note_attributes   jsonb,

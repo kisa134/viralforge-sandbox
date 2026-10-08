@@ -22,6 +22,8 @@ export interface ManageStore {
   saveProduct(p: WsProduct): Promise<void>;
   markPaid(creatorId: string, commissionIds: string[], amountCents: number, note: string): Promise<void>;
   undoPayout(payoutId: string): Promise<void>;
+  /** Manual attribution. LOCAL: orderKey = external_id, creatorId "" = авто, "none" = органика. SUPABASE: orderKey = order.id, null/"" = снять привязку. */
+  assignOrder(orderKey: string, creatorId: string | null): Promise<void>;
 }
 
 export class LocalManageStore implements ManageStore {
@@ -32,7 +34,7 @@ export class LocalManageStore implements ManageStore {
   async dataset() { return workspaceToDataset(loadWorkspace()); }
   async saveCreator(c: WsCreator) {
     this.mut((ws) => {
-      if (ws.creators.some((x) => x.id !== c.id && (x.nick === c.nick || x.promo_code === c.promo_code))) throw new Error(`Ник/промокод ${c.promo_code} уже занят`);
+      if (ws.creators.some((x) => x.id !== c.id && (x.nick === c.nick || x.promo_code === c.promo_code))) throw new Error(`Ник ${c.nick} уже занят`);
       const i = ws.creators.findIndex((x) => x.id === c.id); if (i >= 0) ws.creators[i] = c; else ws.creators.push(c);
     });
   }
@@ -45,6 +47,14 @@ export class LocalManageStore implements ManageStore {
     this.mut((ws) => { ws.payouts.push({ id: uid("py"), creator_id: creatorId, commission_ids: ids, amount_cents: amount, paid_at: new Date().toISOString(), note }); });
   }
   async undoPayout(id: string) { this.mut((ws) => { ws.payouts = ws.payouts.filter((p) => p.id !== id); }); }
+  async assignOrder(ext: string, creatorId: string | null) {
+    this.mut((ws) => {
+      const o = ws.orders.find((x) => x.external_id === ext);
+      if (!o) throw new Error("Заказ не найден");
+      if (ws.payouts.some((p) => p.commission_ids.includes(`cm_${ext}`))) throw new Error("По заказу уже отмечена выплата — сначала отмените её");
+      if (creatorId) o.manual_creator_id = creatorId; else delete o.manual_creator_id;
+    });
+  }
   // local-only helpers
   importOrders(rows: Row[]) { let res = { added: 0, updated: 0, skipped: 0 }; this.mut((ws) => { res = importOrderRows(ws, rows); }); return res; }
   importPosts(rows: Row[]) { this.mut((ws) => { ws.post_rows = rows; }); }
@@ -95,7 +105,7 @@ export class SupabaseManageStore implements ManageStore {
     const u = new URL(l.url);
     await unwrap(this.c().from("tracked_link").upsert({
       token: l.code, creator_id: l.creator_id, offer_id: offer, sub_id: l.code, platform: l.platform, keyword: l.keyword,
-      promo_code: decodeURIComponent(u.pathname.split("/").pop() ?? ""), dest_url: l.url,
+      promo_code: null, dest_url: l.url,
       utm_source: u.searchParams.get("utm_source"), utm_medium: "creator", utm_campaign: u.searchParams.get("utm_campaign"), utm_content: l.code, revoked_at: null,
     }));
   }
@@ -113,5 +123,9 @@ export class SupabaseManageStore implements ManageStore {
     const c = this.c();
     await unwrap(c.from("commission").update({ status: "APPROVED", payout_id: null }).eq("payout_id", id));
     await unwrap(c.from("payout").delete().eq("id", id));
+  }
+  async assignOrder(orderId: string, creatorId: string | null) {
+    const { error } = await this.c().rpc("attribute_order_manual", { p_order: orderId, p_creator: creatorId || null });
+    if (error) throw new Error(error.message);
   }
 }

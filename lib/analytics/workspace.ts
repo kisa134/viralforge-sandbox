@@ -17,7 +17,8 @@ export interface WsSettings {
 export interface WsProduct { id: string; title: string; handle: string; price_cents: number; cogs_cents: number | null; keyword: string }
 export interface WsCreator {
   id: string; nick: string; contact: string; handles: { IG: string; TT: string; YT: string };
-  promo_code: string; payout_rule: PayoutRule | null; payout_value: number | null; status: "ACTIVE" | "PAUSED"; created_at: string;
+  promo_code: string; // internal creator id «LIKKY-NICK» (not a Shopify discount code; matched only if a code happens to exist)
+  payout_rule: PayoutRule | null; payout_value: number | null; status: "ACTIVE" | "PAUSED"; created_at: string;
 }
 export interface WsLink {
   code: string; creator_id: string; product_id: string; platform: Platform; keyword: string;
@@ -27,6 +28,8 @@ export interface WsOrderItem { title: string; sku: string; qty: number; price_ce
 export interface WsOrder {
   external_id: string; ordered_at: string; subtotal_cents: number; discount_cents: number; total_cents: number;
   refunded_cents: number; discount_codes: string[]; financial_status: string; utm_content: string | null; ref: string | null;
+  utm_campaign?: string | null; creator_hint?: string | null; // from CSV columns utm_campaign / creator
+  manual_creator_id?: string | null; // founder's manual choice: creator id, "none" = органика, absent = авто
   items: WsOrderItem[]; imported_at: string;
 }
 export interface WsPayout { id: string; creator_id: string; commission_ids: string[]; amount_cents: number; paid_at: string; note: string }
@@ -84,9 +87,10 @@ export function normalizeNick(raw: string): string {
 export const promoCodeFor = (nick: string) => `LIKKY-${normalizeNick(nick).toUpperCase().replace(/_/g, "")}`;
 export const PLATFORM_SOURCE: Record<Platform, string> = { IG: "instagram", TT: "tiktok", YT: "youtube" };
 
-export function buildDiscountLink(domain: string, code: string, handle: string, platform: Platform, nick: string, postCode: string): string {
-  return `https://${domain}/discount/${encodeURIComponent(code)}?redirect=/products/${handle}` +
-    `&utm_source=${PLATFORM_SOURCE[platform]}&utm_medium=creator&utm_campaign=${encodeURIComponent(nick)}&utm_content=${encodeURIComponent(postCode)}`;
+/** Link-only attribution: straight to the product page, `ref` = tracked link slug (= post code). */
+export function buildProductLink(domain: string, handle: string, slug: string, platform: Platform, nick: string): string {
+  return `https://${domain}/products/${handle}?ref=${encodeURIComponent(slug)}` +
+    `&utm_source=${PLATFORM_SOURCE[platform]}&utm_medium=creator&utm_campaign=${encodeURIComponent(nick)}&utm_content=${encodeURIComponent(slug)}`;
 }
 export function nextPostCode(ws: { links: WsLink[] }, creator: WsCreator): string {
   let n = ws.links.filter((l) => l.creator_id === creator.id).length + 1;
@@ -135,7 +139,7 @@ export function importOrderRows(ws: Workspace, rows: Row[]): { added: number; up
     const codes = g(h, "discount code", "discount_code", "promo", "промокод").split(/[,\s]+/).map((c) => c.trim().toUpperCase()).filter(Boolean);
     const landing = parseParams(g(h, "landing site", "landing_site", "landing"));
     const notes = g(h, "note attributes", "note_attributes");
-    const noteRef = notes.match(/ref\s*[:=]\s*([A-Za-z0-9_-]+)/)?.[1] ?? null;
+    const noteRef = notes.match(/(?:^|[\s,;])_?(?:vf_)?ref\s*[:=]\s*([A-Za-z0-9_-]+)/i)?.[1] ?? null;
     const dateRaw = g(h, "paid at", "created at", "ordered_at", "date", "дата");
     const t = Date.parse(dateRaw.replace(/ ([+-]\d{4})$/, "$1"));
     if (!Number.isFinite(t)) { skipped++; return; }
@@ -143,18 +147,22 @@ export function importOrderRows(ws: Workspace, rows: Row[]): { added: number; up
       external_id: ext, ordered_at: new Date(t).toISOString(), subtotal_cents: subtotal, discount_cents: discount, total_cents: total,
       refunded_cents: money(g(h, "refunded amount", "refunded", "возврат")) ?? 0, discount_codes: codes,
       financial_status: g(h, "financial status", "status").toLowerCase() || "paid",
-      utm_content: g(h, "utm_content") || landing?.get("utm_content") || null, ref: landing?.get("ref") || noteRef,
+      utm_content: g(h, "utm_content") || landing?.get("utm_content") || null,
+      ref: g(h, "ref", "vf_ref") || landing?.get("ref") || noteRef || null,
+      utm_campaign: g(h, "utm_campaign") || landing?.get("utm_campaign") || null,
+      creator_hint: g(h, "creator", "креатор", "creator_nick") || null,
       items, imported_at: new Date().toISOString(),
     };
     const i = ws.orders.findIndex((o) => o.external_id === ext);
-    if (i >= 0) { ws.orders[i] = order; updated++; } else { ws.orders.push(order); added++; }
+    if (i >= 0) { if (ws.orders[i].manual_creator_id !== undefined) order.manual_creator_id = ws.orders[i].manual_creator_id; ws.orders[i] = order; updated++; } else { ws.orders.push(order); added++; }
   });
   return { added, updated, skipped };
 }
 
 // ───────── Attribution + accruals (browser mode) ─────────
 export interface Accrual {
-  id: string; order: WsOrder; creator_id: string | null; link_code: string | null; method: "PROMO" | "LINK" | null;
+  id: string; order: WsOrder; creator_id: string | null; link_code: string | null; method: "LINK" | "MANUAL" | "PROMO" | null;
+  how: string; // human-readable: how the order got attributed
   amount_cents: number | null; status: "HELD" | "APPROVED" | "PAID" | "VOID" | null; hold_until: string | null; payout_id: string | null;
   reason: string | null; // why amount is unknown
 }
@@ -165,6 +173,8 @@ export function ruleFor(ws: Workspace, c: WsCreator): { rule: PayoutRule; value:
 
 export function computeAccruals(ws: Workspace, now = Date.now()): Accrual[] {
   const byCode = new Map(ws.creators.map((c) => [c.promo_code.toUpperCase(), c]));
+  const byNick = new Map(ws.creators.map((c) => [c.nick, c]));
+  const byId = new Map(ws.creators.map((c) => [c.id, c]));
   const linkByCode = new Map(ws.links.map((l) => [l.code.toLowerCase(), l]));
   const paidBy = new Map<string, string>();
   ws.payouts.forEach((p) => p.commission_ids.forEach((id) => paidBy.set(id, p.id)));
@@ -174,15 +184,27 @@ export function computeAccruals(ws: Workspace, now = Date.now()): Accrual[] {
     let creator: WsCreator | undefined;
     let method: Accrual["method"] = null;
     let link: WsLink | undefined;
-    for (const code of o.discount_codes) { const c = byCode.get(code.toUpperCase()); if (c) { creator = c; method = "PROMO"; break; } }
-    const tok = (o.ref || o.utm_content || "").toLowerCase();
-    if (tok) {
-      link = linkByCode.get(tok);
-      if (link && !creator) { creator = ws.creators.find((c) => c.id === link!.creator_id); method = "LINK"; }
-      if (link && creator && link.creator_id !== creator.id) link = undefined;
+    let how = "органика";
+    // Priority: manual → ref/utm_content (tracked link) → CSV column creator → utm_campaign (nick) → discount code (optional fallback)
+    if (o.manual_creator_id) {
+      if (o.manual_creator_id !== "none") { creator = byId.get(o.manual_creator_id); if (creator) { method = "MANUAL"; how = "вручную"; } }
+    } else {
+      for (const tok of [o.ref, o.utm_content]) {
+        const l = tok ? linkByCode.get(tok.toLowerCase()) : undefined;
+        if (l) { link = l; creator = byId.get(l.creator_id); method = "LINK"; how = `ссылка ${l.code}`; break; }
+      }
+      const hint = o.creator_hint ? o.creator_hint.trim() : "";
+      if (!creator && hint) {
+        const l = linkByCode.get(hint.toLowerCase());
+        creator = l ? byId.get(l.creator_id) : byNick.get(normalizeNick(hint)) ?? byCode.get(hint.toUpperCase());
+        if (l && creator) link = l;
+        if (creator) { method = "MANUAL"; how = `колонка creator`; }
+      }
+      if (!creator && o.utm_campaign) { creator = byNick.get(normalizeNick(o.utm_campaign)); if (creator) { method = "LINK"; how = `utm_campaign ${o.utm_campaign}`; } }
+      if (!creator) for (const code of o.discount_codes) { const c = byCode.get(code.toUpperCase()); if (c) { creator = c; method = "PROMO"; how = `код ${code}`; break; } }
     }
-    const base = { id, order: o, link_code: link?.code ?? null, payout_id: null as string | null };
-    if (!creator) return { ...base, creator_id: null, method: null, amount_cents: null, status: null, hold_until: null, reason: "органика: нет промокода/метки креатора" };
+    const base = { id, order: o, link_code: link?.code ?? null, payout_id: null as string | null, how };
+    if (!creator) return { ...base, creator_id: null, method: null, amount_cents: null, status: null, hold_until: null, reason: o.manual_creator_id === "none" ? "органика (вручную)" : "органика: нет метки креатора (ref / колонка creator) — выберите креатора вручную" };
     const { rule, value } = ruleFor(ws, creator);
     const net = Math.max(0, o.total_cents - o.refunded_cents);
     const voided = o.refunded_cents >= o.total_cents && o.total_cents > 0 || ["refunded", "voided"].includes(o.financial_status);
@@ -254,7 +276,7 @@ export function workspaceToDataset(ws: Workspace, label = "Мои CSV · бра�
   d.payouts = ws.payouts.map((p) => ({ id: p.id, creator_id: p.creator_id, amount_cents: p.amount_cents, status: "PAID", paid_at: p.paid_at, method: p.note || "—" }));
   const needs = acc.filter((a) => a.creator_id && a.amount_cents === null).length;
   if (needs) d.meta.warnings.push(`${needs} начислений без суммы: ${ws.settings.payout_value === null ? "правило выплаты не задано («задай сумму» в Настройках)" : "не хватает COGS"}.`);
-  if (!ws.creators.length && !ws.orders.length) d.meta.warnings.push("Пока пусто. Начните с вкладки «Креаторы» → добавьте креатора, затем «Ссылки» и «Импорт».");
+  if (!ws.creators.length && !ws.orders.length) d.meta.warnings.push("Пока пусто. Начните с вкладки «Креаторы» → добавьте креатора, затем «Ссылки» и «Заказы / импорт».");
   d.meta.warnings.push("Найм, тренды и расходы в браузерном режиме не ведутся: эти блоки заполнятся в режиме «База» (Supabase).");
   return d;
 }

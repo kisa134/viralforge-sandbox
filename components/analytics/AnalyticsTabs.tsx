@@ -92,7 +92,7 @@ export function FunnelTab({ d, demo }: { d: Dataset; demo: boolean }) {
             const keys = Object.keys(by);
             return keys.length ? keys.map((k) => <Bar key={k} label={k} value={by[k]} max={max} right={`${fmtN(by[k])} · ${fmtPct(by[k] / d.conversions.length, 0)}`} />) : <div className="an-note">Нет атрибутированных заказов.</div>;
           })()}
-          <div className="an-note">Приоритет при равенстве: PROMO &gt; LINK &gt; PIXEL &gt; KEYWORD &gt; MANUAL; окно 7 дн (ATTRIBUTION.md).</div>
+          <div className="an-note">Атрибуция только по ссылкам: ref из ссылки креатора (landing_site / атрибуты корзины) → utm_campaign → кодовое слово → вручную; код скидки — лишь запасной вариант, если вдруг есть. Окно 7 дн.</div>
         </div>
       </div>
     </section>

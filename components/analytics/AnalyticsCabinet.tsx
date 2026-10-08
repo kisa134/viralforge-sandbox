@@ -16,7 +16,7 @@ import { Login } from "./Login";
 type Tab = "funnel" | "content" | "creators" | "links" | "payouts" | "recruit" | "import" | "settings";
 const TABS: [Tab, string][] = [
   ["funnel", "Воронка"], ["content", "Ролики / Формулы"], ["creators", "Креаторы"], ["links", "Ссылки"],
-  ["payouts", "Выплаты"], ["recruit", "Найм"], ["import", "Импорт"], ["settings", "Настройки"],
+  ["payouts", "Выплаты"], ["recruit", "Найм"], ["import", "Заказы / импорт"], ["settings", "Настройки"],
 ];
 const MANAGE: Tab[] = ["links", "import", "settings"];
 type Kind = "DEMO" | "LOCAL" | "DB";
@@ -87,11 +87,11 @@ export function AnalyticsCabinet() {
   const toMine = () => setKind("LOCAL");
 
   const steps: TourStep[] = useMemo(() => [
-    { title: "Кабинет сквозной аналитики", body: <>Здесь вся цепочка: <b>креатор → ссылка/промокод → пост → заказ Shopify → начисление → выплата</b>. Тур — 6 шагов.</> },
+    { title: "Кабинет сквозной аналитики", body: <>Здесь вся цепочка: <b>креатор → ссылка с меткой ref → пост → заказ Shopify → начисление → выплата</b>. Тур — 6 шагов.</> },
     { title: "Демо / Мои CSV / База", selector: ".an-controls", body: <><b>Демо</b> — выдуманные цифры, чтобы посмотреть логику. <b>Мои CSV</b> — ваши креаторы и заказы из выгрузки Shopify, хранятся только в этом браузере. <b>База</b> — живой режим: Supabase, вход по email, клики и заказы приходят сами. Баннер сверху всегда показывает, что открыто.</> },
-    { title: "1. Креаторы", selector: '[data-tab="creators"]', onEnter: () => setTab("creators"), body: <>Добавьте креатора — промокод <code>LIKKY-НИК</code> создастся сам. Такой же код нужно завести в Shopify → Discounts.</> },
-    { title: "2. Ссылки на посты", selector: '[data-tab="links"]', onEnter: () => setTab("links"), body: <>Выберите креатора и товар → ссылка Shopify, которая сама применяет промокод, + кодовое слово, текст для DM и QR.</> },
-    { title: "3. Импорт заказов", selector: '[data-tab="import"]', onEnter: () => setTab("import"), body: <>Выгрузите заказы из Shopify (Orders → Export → CSV) и загрузите сюда. Заказ привяжется к креатору по колонке <b>Discount Code</b>.</> },
+    { title: "1. Креаторы", selector: '[data-tab="creators"]', onEnter: () => setTab("creators"), body: <>Добавьте креатора (ник, контакт, соцсети). Ничего заводить в Shopify не нужно — креатор узнаётся по метке в его ссылках.</> },
+    { title: "2. Ссылки на посты", selector: '[data-tab="links"]', onEnter: () => setTab("links"), body: <>Выберите креатора и товар → ссылка прямо на товар с меткой <code>ref</code> (= код поста) + кодовое слово, текст для DM и QR. По этой метке заказ привяжется к креатору.</> },
+    { title: "3. Заказы", selector: '[data-tab="import"]', onEnter: () => setTab("import"), body: <>В «Базе» заказы приходят сами (вебхук Shopify) и привязываются по <code>ref</code>. В «Мои CSV» — загрузите Orders → Export; в CSV Shopify нет источника, поэтому креатора выбираете вручную в таблице (или колонка <code>creator</code>).</> },
     { title: "4. Выплаты и настройки", selector: '[data-tab="payouts"]', onEnter: () => setTab("payouts"), body: <>«К выплате» — начисления, у которых прошло удержание (14 дней). Перевели деньги — «Отметить выплачено». Сумму за продажу и COGS задайте в «Настройках». Подробно — «❓ Как это работает».</> },
   ], []);
 
@@ -100,7 +100,7 @@ export function AnalyticsCabinet() {
       {isDemo ? (
         <div className="an-demo-banner">DEMO · СГЕНЕРИРОВАННЫЕ ПРИМЕРНЫЕ ДАННЫЕ · НЕ РЕАЛЬНЫЕ ЦИФРЫ LIKKY / VIRALFORGE</div>
       ) : (
-        <div className="an-real-banner">{kind === "DB" ? "БАЗА · живой режим (Supabase): реальные клики и заказы" : "МОИ CSV · реальные данные, хранятся только в этом браузере (бэкап — вкладка «Импорт»)"}</div>
+        <div className="an-real-banner">{kind === "DB" ? "БАЗА · живой режим (Supabase): реальные клики и заказы" : "МОИ CSV · реальные данные, хранятся только в этом браузере (бэкап — вкладка «Заказы / импорт»)"}</div>
       )}
       <header className="topbar an-topbar">
         <div className="logo-dot" aria-hidden />
@@ -156,7 +156,7 @@ export function AnalyticsCabinet() {
             {tab === "links" && <><MineOnlyNote isDemo={isDemo} onSwitch={toMine} /><LinksTab store={store} ws={ws} mine={mine} act={act} /></>}
             {tab === "payouts" && <PayoutsTab d={view} demo={isDemo} store={store} act={act} />}
             {tab === "recruit" && <RecruitTab d={view} demo={isDemo} />}
-            {tab === "import" && <><MineOnlyNote isDemo={isDemo} onSwitch={toMine} /><ImportTab store={store} ws={ws} act={act} /></>}
+            {tab === "import" && <><MineOnlyNote isDemo={isDemo} onSwitch={toMine} /><ImportTab store={store} ws={ws} mine={mine} act={act} /></>}
             {tab === "settings" && <><MineOnlyNote isDemo={isDemo} onSwitch={toMine} /><SettingsTab key={tick} store={store} ws={ws} act={act} /></>}
           </>
         )}
