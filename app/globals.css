@@ -582,3 +582,22 @@ a {
 .toast.err { background: #2a1010; border-color: #5a2424; color: #ffd6d6; }
 .login-card { max-width: 560px; }
 .an-main label.btn { display: inline-flex; align-items: center; }
+/* Creator guide (/guide/creator) */
+.creator-guide .guide-main h4 { margin: 10px 0 4px; font-size: 14px; }
+.creator-guide .guide-main p + p, .creator-guide .guide-main p + ul, .creator-guide .guide-main ul + p { margin-top: 8px; }
+.creator-guide .guide-main h4 + ul { margin-bottom: 6px; }
+.creator-guide hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+.creator-guide blockquote { margin: 10px 0 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: #1a140c; border-radius: 8px; }
+.creator-guide blockquote p { margin: 0; }
+.creator-guide blockquote p + p { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); }
+.creator-guide .cg-hero p:first-child { font-size: 15px; }
+mark.ph { background: #3a2c0a; color: #ffcf6b; border: 1px dashed #8a6a1a; border-radius: 5px; padding: 0 4px; font-weight: 650; }
+.cg-faq { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.cg-faq details { border: 1px solid var(--border); border-radius: 10px; background: #0d1017; }
+.cg-faq summary { cursor: pointer; padding: 10px 12px; font-size: 13.5px; font-weight: 650; list-style: none; }
+.cg-faq summary::-webkit-details-marker { display: none; }
+.cg-faq summary::before { content: "＋"; color: var(--accent); margin-right: 8px; }
+.cg-faq details[open] summary::before { content: "－"; }
+.cg-a { padding: 0 12px 10px 32px; }
+.guide-cta { display: inline-block; margin-top: 10px; font-size: 14px; font-weight: 700; padding: 10px 14px; border-radius: 10px; background: #2a1d10; color: var(--accent); border: 1px solid #5a3a18; text-decoration: none; }
+.guide-cta:hover { background: #3a2814; }
