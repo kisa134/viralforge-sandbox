@@ -25,6 +25,27 @@ export const updateProductCosts = async (c: SupabaseClient, id: string, p: Recor
   const { error } = await c.rpc("admin_update_product_costs", { p_product: id, p });
   if (error) throw new Error(error.message);
 };
+export const addProduct = async (c: SupabaseClient, p: Record<string, unknown>) => {
+  const { data, error } = await c.rpc("admin_add_product", { p });
+  if (error) throw new Error(error.message);
+  return data as string;
+};
+
+/** Recommended creator payout: ~15% of gross margin (price − landed COGS), range 10–20%. Final payout is whatever admins enter. */
+export const MIN_PROFIT_CENTS = 1000, MIN_MARGIN = 0.25;
+export function recommendPayout(priceC: number, landedC: number, s: Pick<BizSettings, "payment_fee_pct" | "payment_fee_fixed_cents" | "refund_rate">) {
+  const gross = Math.max(0, priceC - landedC);
+  const fee = Math.round(priceC * (s.payment_fee_pct ?? 0.029)) + (s.payment_fee_fixed_cents ?? 30);
+  const reserve = Math.round(priceC * (s.refund_rate ?? 0.05));
+  const maxCpa = priceC - landedC - fee - reserve;
+  const at = (pct: number) => Math.round(gross * pct);
+  return { gross, fee, reserve, maxCpa, rec: at(0.15), lo: at(0.1), hi: at(0.2) };
+}
+export function profitAfter(priceC: number, maxCpa: number, payoutC: number) {
+  const profit = maxCpa - payoutC;
+  return { profit, margin: priceC ? profit / priceC : 0, lowProfit: profit < MIN_PROFIT_CENTS, lowMargin: priceC ? profit / priceC < MIN_MARGIN : true };
+}
+
 export const setBizSettings = async (c: SupabaseClient, p: Record<string, unknown>) => {
   const { error } = await c.rpc("admin_set_biz_settings", { p });
   if (error) throw new Error(error.message);
@@ -54,6 +75,7 @@ export function unitEconomics(p: BizProduct, s: BizSettings): Unit {
   const flags: Unit["flags"] = [];
   const costMissing = p.cogs_cents === null;
   if (costMissing) flags.push({ level: "bad", text: "Нет себестоимости — впиши цену CJ" });
+  if (p.payout_value === null || p.payout_value === undefined) flags.push({ level: "bad", text: "Не задана выплата креатору — партнёры видят «ставка уточняется», продажи уходят «на проверку»" });
   const margin = price ? profit / price : 0;
   if (!costMissing && profit <= 0) flags.push({ level: "bad", text: "Убыточен на каждом заказе" });
   else if (!costMissing && margin < THIN_MARGIN) flags.push({ level: "warn", text: `Тонкая маржа ${(margin * 100).toFixed(0)}% — поднять цену, взять меньший размер или поторговаться с CJ` });
@@ -135,7 +157,11 @@ export function adviseRules(m: BizMetrics, units: Unit[], periodDays: number | n
   for (const u of valid.filter((x) => x.margin < THIN_MARGIN))
     out.push({ prio: 2, icon: "⚠️", title: `${u.p.title}: прибыль ${usdS(u.profit)} с заказа (${(u.margin * 100).toFixed(0)}%)`, why: `Себестоимость с доставкой ${usdS(u.landed)} из ${usdS(u.price)}. Подними цену, возьми размер дешевле у CJ или не делай его основным.` });
   if ((t.commissions_needs_review ?? 0) > 0)
-    out.push({ prio: 1, icon: "🧾", title: `${t.commissions_needs_review} начислений ждут проверки — нет себестоимости товара`, why: "Креатору платим 15% от маржи, а без себестоимости маржу не посчитать. Впиши себестоимость в «Юнит-экономике», затем пересчитай заказ в /analytics (ручная привязка)." });
+    out.push({ prio: 1, icon: "🧾", title: `${t.commissions_needs_review} начислений ждут проверки`, why: "У товара в заказе не задана выплата креатору. Задай «Выплата за продажу, $» в «Юнит-экономике», затем пересчитай заказ в /analytics (ручная привязка)." });
+  const noPay = units.filter((u) => u.p.payout_value === null || u.p.payout_value === undefined);
+  if (noPay.length) out.push({ prio: 1, icon: "💵", title: `Задай выплату креатору: ${noPay.map((u) => u.p.title).join(", ")}`, why: "Без суммы партнёры видят «ставка уточняется» и не продвигают товар." });
+  for (const u of valid.filter((x) => x.p.payout_value !== null && x.profit < MIN_PROFIT_CENTS))
+    out.push({ prio: 2, icon: "💸", title: `${u.p.title}: наша прибыль ${usdS(u.profit)} с заказа — меньше $10`, why: `Выплата креатору ${usdS(u.creator)}. Проверь цену и выплату.` });
   if (t.orders_cost_missing > 0 || units.some((u) => u.costMissing))
     out.push({ prio: 2, icon: "🧾", title: "Впиши себестоимость всех товаров", why: "Без неё прибыль и советы неточны." });
 

@@ -224,38 +224,19 @@ async function handleOrder(o: R, topic: string) {
   if (status === "REFUNDED" || status === "VOIDED") return { orderId, attributed: method, commission: "skipped (refunded/voided)" };
 
   // Commission
-  // Payout precedence: creator override → offer payout (when set) → global settings
-  const creator = unwrap(await db.from("creator").select("payout_rule, payout_value").eq("id", creatorId).single(), "creator") as R;
-  const offer = offerId ? unwrap(await db.from("offer").select("payout_rule, payout_value").eq("id", offerId).maybeSingle(), "offer payout") as R | null : null;
-  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  const rule: string = creator.payout_rule ?? (offer && offer.payout_value !== null ? offer.payout_rule : s.payout_rule);
-  const value: number | null = creator.payout_rule ? num(creator.payout_value) : offer && offer.payout_value !== null ? num(offer.payout_value) : num(s.payout_value);
-  const net = row.subtotal_cents; // Shopify subtotal_price is already after discounts
-  let amount: number | null = null, basis: number | null = null;
-  if (value !== null) {
-    if (rule === "CPA_FIXED") amount = Math.round(value * 100);
-    else if (rule === "PCT_REVENUE") { basis = net; amount = Math.round(net * value); }
-    else if (rule === "PCT_MARGIN") {
-      // margin = subtotal after discounts (no shipping/tax) − Σ landed cost (CJ product + shipping) × qty, floor 0
-      if (items.length && items.every((i) => i.cogs_cents !== null)) {
-        basis = Math.max(0, net - items.reduce((a, i) => a + i.cogs_cents * i.qty, 0));
-        amount = Math.round(basis * value);
-      }
-    }
-  }
-  if (amount === null && value !== null && rule === "PCT_MARGIN") {
-    // COGS missing for some item → never pay on a wrong base: park the commission for admin review
+  // Payout: partner individual override > product fixed $ per unit × qty. Same SQL calc as manual attribution (private.calc_order_commission).
+  const calc = unwrap(await db.rpc("calc_order_commission", { p_order: orderId, p_creator: creatorId }), "commission calc") as R[] | R;
+  const cc = (Array.isArray(calc) ? calc[0] : calc) as R | undefined;
+  if (!cc || cc.needs_review) {
+    // no payout set for a product (or no COGS for a %-of-margin override) → never pay a guessed amount: park for admin review
     unwrap(await db.from("commission").upsert({
-      conversion_id: conv.id, creator_id: creatorId, kind: "CPA", basis_cents: null, rate: value, amount_cents: 0,
+      conversion_id: conv.id, creator_id: creatorId, kind: "CPA", basis_cents: null, rate: cc?.rate ?? null, amount_cents: 0,
       status: "NEEDS_REVIEW", hold_until: null, idempotency_key: `cpa:${externalId}`,
     }, { onConflict: "idempotency_key", ignoreDuplicates: true }), "commission needs_review");
-    await logEvent("commission_needs_amount", { order_id: orderId, creator_id: creatorId, rule, reason: "missing COGS" });
+    await logEvent("commission_needs_amount", { order_id: orderId, creator_id: creatorId, reason: "payout not set for product (or COGS missing)" });
     return { orderId, attributed: method, commission: "needs_review" };
   }
-  if (amount === null) {
-    await logEvent("commission_needs_amount", { order_id: orderId, creator_id: creatorId, rule, reason: value === null ? "payout_value not set" : "missing COGS" });
-    return { orderId, attributed: method, commission: "needs_amount" };
-  }
+  const amount = Number(cc.amount_cents), basis = cc.basis_cents === null ? null : Number(cc.basis_cents), value = cc.rate === null ? null : Number(cc.rate);
   const holdUntil = new Date(new Date(orderedAt).getTime() + (Number(s.hold_days) || 0) * 86400000).toISOString();
   unwrap(await db.from("commission").upsert({
     conversion_id: conv.id, creator_id: creatorId, kind: "CPA", basis_cents: basis, rate: value, amount_cents: amount,

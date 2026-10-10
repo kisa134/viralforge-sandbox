@@ -178,13 +178,13 @@ function RateEditor({ c, p, onDone, toast }: { c: SupabaseClient; p: AdminPartne
       const n = val.trim() === "" ? null : Number(val.replace(",", "."));
       if (rule && (n === null || !Number.isFinite(n) || n < 0)) throw new Error("Введите число");
       await adminSetRate(c, p.id, rule || null, rule ? (rule === "CPA_FIXED" ? n : (n as number) / 100) : null);
-      toast(`Ставка @${p.login}: ${rule ? payoutText(rule, rule === "CPA_FIXED" ? n : (n as number) / 100) : "по умолчанию"}`); onDone();
+      toast(`Ставка @${p.login}: ${rule ? payoutText(rule, rule === "CPA_FIXED" ? n : (n as number) / 100) : "как у товара"}`); onDone();
     } catch (e) { toast("Ошибка: " + (e as Error).message); }
   };
   return (
     <div className="ad-rate">
       <select className="pt-input sm" value={rule} onChange={(e) => setRule(e.target.value)}>
-        <option value="">Ставка: по умолчанию</option>
+        <option value="">Выплата: как у товара</option>
         <option value="CPA_FIXED">$ за продажу</option>
         <option value="PCT_REVENUE">% от суммы заказа</option>
         <option value="PCT_MARGIN">% от маржи</option>
@@ -286,7 +286,6 @@ export function AdminApp() {
 
       {tab === "partners" && (
         <>
-          <DefaultRateEditor c={c} rate={defRate} onDone={reload} toast={toast} />
           <input className="pt-input" style={{ marginBottom: 10 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Поиск по логину или Telegram" />
           {!others.length && <section className="pt-card"><p className="pt-dim">Пока никого.</p></section>}
           {others.map((p) => (
@@ -297,7 +296,7 @@ export function AdminApp() {
                 <span>🔗 {p.links}</span><span>👆 {p.clicks}</span><span>🛒 {p.orders}</span><span>💵 {usd(p.revenue_cents)}</span>
                 <span>💰 {usd(p.earned_cents)}</span><span>💸 {usd(p.paid_cents)}</span>
               </div>
-              <div className="pt-dim pt-small">Ставка: <b>{p.effective ? payoutText(p.effective.rule, p.effective.value) : p.payout_rule ? payoutText(p.payout_rule, p.payout_value) : "по умолчанию"}</b> ({p.payout_rule ? "индивидуальная" : "по умолчанию"}) · с {fmtDate(p.created_at)}</div>
+              <div className="pt-dim pt-small">Выплата: <b>{p.payout_rule ? payoutText(p.payout_rule, p.payout_value) : "как у товара ($ за продажу)"}</b>{p.payout_rule ? " (индивидуальная)" : ""} · с {fmtDate(p.created_at)}</div>
               <RateEditor c={c} p={p} onDone={reload} toast={toast} />
               <div className="pt-row ad-actions">
                 {p.status === "ACTIVE"

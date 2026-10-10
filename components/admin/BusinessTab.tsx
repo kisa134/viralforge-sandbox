@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  adviseRules, bizMetrics, calc, halloweenDaysLeft, nsm, pctChange, PRESETS, reverse, setBizSettings, unitEconomics, updateProductCosts,
+  addProduct, adviseRules, bizMetrics, calc, MIN_MARGIN, MIN_PROFIT_CENTS, profitAfter, recommendPayout, halloweenDaysLeft, nsm, pctChange, PRESETS, reverse, setBizSettings, unitEconomics, updateProductCosts,
   type BizMetrics, type BizProduct, type CalcIn, type Unit,
 } from "@/lib/biz";
 
@@ -24,26 +24,62 @@ function Delta({ cur, prev }: { cur: number; prev: number }) {
 }
 
 // ───────── Unit economics ─────────
-function CostEditor({ c, p, onDone, toast }: { c: SupabaseClient; p: BizProduct; onDone: () => void; toast: (m: string) => void }) {
-  const [cogs, setCogs] = useState(p.cogs_cents === null ? "" : (p.cogs_cents / 100).toFixed(2));
-  const [ship, setShip] = useState(p.shipping_cost_cents === null ? "" : (p.shipping_cost_cents / 100).toFixed(2));
-  const [dmin, setDmin] = useState(p.ship_days_min?.toString() ?? "");
-  const [dmax, setDmax] = useState(p.ship_days_max?.toString() ?? "");
+const toCents = (v: string) => { const x = Number(v.replace(",", ".").replace(/[$\s]/g, "")); return v.trim() === "" || !Number.isFinite(x) ? null : Math.round(x * 100); };
+const dollars = (c: number | null | undefined) => (c === null || c === undefined ? "" : (c / 100).toFixed(2));
+
+/** Add / edit product: price, CJ cost, shipping, delivery days and the creator payout $ with a live recommendation. */
+function ProductForm({ c, p, s, onDone, onCancel, toast }: { c: SupabaseClient; p: BizProduct | null; s: BizMetrics["settings"]; onDone: () => void; onCancel: () => void; toast: (m: string) => void }) {
+  const [title, setTitle] = useState(p?.title ?? "");
+  const [handle, setHandle] = useState("");
+  const [price, setPrice] = useState(dollars(p?.price_cents));
+  const [cogs, setCogs] = useState(dollars(p?.cogs_cents));
+  const [ship, setShip] = useState(dollars(p?.shipping_cost_cents));
+  const [dmin, setDmin] = useState(p?.ship_days_min?.toString() ?? "");
+  const [dmax, setDmax] = useState(p?.ship_days_max?.toString() ?? "");
+  const [pay, setPay] = useState(p && p.payout_rule === "CPA_FIXED" && p.payout_value !== null ? Number(p.payout_value).toFixed(2) : "");
+  const priceC = toCents(price), landedC = (toCents(cogs) ?? 0) + (toCents(ship) ?? 0), payC = toCents(pay);
+  const r = priceC && toCents(cogs) !== null ? recommendPayout(priceC, landedC, s) : null;
+  const res = r && payC !== null && priceC ? profitAfter(priceC, r.maxCpa, payC) : null;
   const save = async () => {
     try {
-      const toC = (v: string) => (v.trim() === "" ? "" : String(Math.round(Number(v.replace(",", ".")) * 100)));
-      if ([cogs, ship].some((v) => v.trim() !== "" && !Number.isFinite(Number(v.replace(",", "."))))) throw new Error("Введите суммы в $");
-      await updateProductCosts(c, p.id, { cogs_cents: toC(cogs), shipping_cost_cents: toC(ship), ship_days_min: dmin, ship_days_max: dmax });
-      toast(`${shortTitle(p.title)}: себестоимость сохранена`); onDone();
+      if (!title.trim()) throw new Error("Укажите название");
+      if (!priceC || priceC <= 0) throw new Error("Укажите цену");
+      if ([cogs, ship, pay].some((v) => v.trim() !== "" && toCents(v) === null)) throw new Error("Суммы — числами в $");
+      const body = { title, price_cents: String(priceC), cogs_cents: cogs.trim() === "" ? "" : String(toCents(cogs)), shipping_cost_cents: ship.trim() === "" ? "" : String(toCents(ship)),
+        ship_days_min: dmin, ship_days_max: dmax, payout_cents: pay.trim() === "" ? "" : String(payC) };
+      if (p) { await updateProductCosts(c, p.id, body); toast(`${shortTitle(title)}: сохранено`); }
+      else { await addProduct(c, { ...body, handle }); toast(`Товар «${title}» добавлен`); }
+      onDone();
     } catch (e) { toast("Ошибка: " + (e as Error).message); }
   };
   return (
-    <div className="bz-edit">
-      <label>Товар CJ, $<input className="pt-input sm" inputMode="decimal" value={cogs} onChange={(e) => setCogs(e.target.value)} /></label>
-      <label>Доставка в США, $<input className="pt-input sm" inputMode="decimal" value={ship} onChange={(e) => setShip(e.target.value)} /></label>
-      <label>Дней от<input className="pt-input sm" inputMode="numeric" value={dmin} onChange={(e) => setDmin(e.target.value)} /></label>
-      <label>до<input className="pt-input sm" inputMode="numeric" value={dmax} onChange={(e) => setDmax(e.target.value)} /></label>
-      <button className="pt-btn sm primary" onClick={save}>💾</button>
+    <div className="bz-form">
+      <div className="bz-grid">
+        <label className="bz-in">Название<input className="pt-input sm" name="pf_title" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        {!p && <label className="bz-in">Ссылка на товар или handle<input className="pt-input sm" name="pf_handle" autoCapitalize="none" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="likky.store/products/…" /></label>}
+        <label className="bz-in">Цена в магазине, $<input className="pt-input sm" name="pf_price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
+        <label className="bz-in">Товар CJ, $<input className="pt-input sm" name="pf_cogs" inputMode="decimal" value={cogs} onChange={(e) => setCogs(e.target.value)} /></label>
+        <label className="bz-in">Доставка в США, $<input className="pt-input sm" name="pf_ship" inputMode="decimal" value={ship} onChange={(e) => setShip(e.target.value)} /></label>
+        <label className="bz-in">Доставка, дней от<input className="pt-input sm" inputMode="numeric" value={dmin} onChange={(e) => setDmin(e.target.value)} /></label>
+        <label className="bz-in">до<input className="pt-input sm" inputMode="numeric" value={dmax} onChange={(e) => setDmax(e.target.value)} /></label>
+        <label className="bz-in bz-pay">Выплата креатору за продажу, $<input className="pt-input sm" name="pf_payout" inputMode="decimal" value={pay} onChange={(e) => setPay(e.target.value)} placeholder={r ? (r.rec / 100).toFixed(2) : ""} /></label>
+      </div>
+      {r ? (
+        <div className="bz-rec">
+          <div>💡 Рекомендуем <b>{$(r.rec)}</b> <span className="bz-dim">(~15% от маржи {$(r.gross)}; диапазон {$(r.lo)}–{$(r.hi)} = 10–20%)</span>
+            <button className="pt-btn sm" onClick={() => setPay((r.rec / 100).toFixed(2))}>Поставить рекомендуемую</button></div>
+          {res ? (
+            <div className={res.lowProfit || res.lowMargin ? "pt-err" : "pt-info"}>
+              Наша прибыль с заказа: <b>{$(res.profit)}</b> · маржа <b>{pct(res.margin, 0)}</b>
+              <span className="bz-dim"> (цена − себестоимость {$(landedC)} − комиссия {$(r.fee)} − резерв {$(r.reserve)} − выплата {$(payC)})</span>
+              {res.lowProfit && <div>⚠️ Прибыль меньше ${(MIN_PROFIT_CENTS / 100).toFixed(0)} с заказа</div>}
+              {res.lowMargin && <div>⚠️ Маржа ниже {(MIN_MARGIN * 100).toFixed(0)}%</div>}
+            </div>
+          ) : <div className="bz-dim pt-small">Впиши выплату — посчитаем нашу прибыль. Без выплаты партнёры видят «ставка уточняется».</div>}
+        </div>
+      ) : <div className="bz-dim pt-small">Впиши цену и себестоимость CJ — покажем рекомендуемую выплату.</div>}
+      <div className="pt-row"><button className="pt-btn primary" onClick={save}>💾 {p ? "Сохранить" : "Добавить товар"}</button><button className="pt-btn" onClick={onCancel}>Отмена</button></div>
+      <p className="bz-dim pt-small">Итоговая выплата — та, что вы впишете. Партнёр видит только «Ты получаешь: $X за продажу».</p>
     </div>
   );
 }
@@ -64,7 +100,7 @@ function SettingsEditor({ c, m, onDone, toast }: { c: SupabaseClient; m: BizMetr
   };
   return (
     <details className="bz-settings">
-      <summary>⚙️ Допущения: комиссия {(s.payment_fee_pct * 100).toFixed(1)}% + {$(s.payment_fee_fixed_cents)}, возвраты {(s.refund_rate * 100).toFixed(0)}%, ставка креатора — в «Партнёрах»</summary>
+      <summary>⚙️ Допущения: комиссия {(s.payment_fee_pct * 100).toFixed(1)}% + {$(s.payment_fee_fixed_cents)}, возвраты {(s.refund_rate * 100).toFixed(0)}%, выплата креатору — у каждого товара</summary>
       <div className="bz-edit">
         <label>Комиссия Shopify, %<input className="pt-input sm" inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} /></label>
         <label>+ фикс, $<input className="pt-input sm" inputMode="decimal" value={fix} onChange={(e) => setFix(e.target.value)} /></label>
@@ -78,11 +114,12 @@ function SettingsEditor({ c, m, onDone, toast }: { c: SupabaseClient; m: BizMetr
 
 function EconView({ c, m, units, reload, toast }: { c: SupabaseClient; m: BizMetrics; units: Unit[]; reload: () => void; toast: (x: string) => void }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   return (
     <>
       <section className="pt-card">
         <h3>🧮 Юнит-экономика (1 заказ = 1 товар)</h3>
-        <p className="pt-dim pt-small">Себестоимость = товар CJ + доставка в США. Креатор — эффективная ставка ({m.settings.payout_rule === "PCT_MARGIN" ? `${((m.settings.payout_value ?? 0) * 100).toFixed(0)}% от маржи = (цена − себестоимость) × ${((m.settings.payout_value ?? 0) * 100).toFixed(0)}%` : m.settings.payout_rule === "PCT_REVENUE" ? `${((m.settings.payout_value ?? 0) * 100).toFixed(0)}% от суммы` : "фикс"}). Резерв на возвраты = {(m.settings.refund_rate * 100).toFixed(0)}% цены. <b>Max CPA</b> — сколько максимум можно отдать за заказ (креатору + реклама), чтобы выйти в ноль.</p>
+        <p className="pt-dim pt-small">Себестоимость = товар CJ + доставка в США. Креатор — фиксированная выплата $ за продажу, задаётся у каждого товара (индивидуальная — в «Партнёрах»). Резерв на возвраты = {(m.settings.refund_rate * 100).toFixed(0)}% цены. <b>Max CPA</b> — сколько максимум можно отдать за заказ (креатору + реклама), чтобы выйти в ноль.</p>
         <div className="bz-tablewrap">
           <table className="bz-table">
             <thead><tr><th>Товар</th><th>Цена</th><th>Себест.</th><th>Креатор</th><th>Комиссия</th><th>Резерв</th><th>Прибыль</th><th>Маржа</th><th>Max CPA</th></tr></thead>
@@ -99,17 +136,21 @@ function EconView({ c, m, units, reload, toast }: { c: SupabaseClient; m: BizMet
           <div className="ad-head"><b>{shortTitle(u.p.title)}</b><span className="bz-big">{u.costMissing ? "—" : $(u.profit)}<small> / заказ</small></span></div>
           <div className="bz-line">
             <span>Цена {$(u.price)}</span><span>CJ {$(u.p.cogs_cents)} + доставка {$(u.p.shipping_cost_cents)} = <b>{$(u.landed)}</b></span>
-            <span>Креатор {$(u.creator)}</span><span>Комиссия {$(u.fee)}</span><span>Резерв {$(u.reserve)}</span>
+            <span>Креатору {u.p.payout_value === null ? "— не задано" : $(u.creator)}</span><span>Комиссия {$(u.fee)}</span><span>Резерв {$(u.reserve)}</span>
           </div>
           <div className="bz-line bz-dim">
             <span>Маржа <b>{pct(u.margin, 0)}</b></span><span>Max CPA {$(u.maxCpa)} (≈{pct(u.beRate, 0)} цены)</span>
             <span>Доставка {u.p.ship_days_min ?? "?"}–{u.p.ship_days_max ?? "?"} дн.{u.p.ship_method ? ` · ${u.p.ship_method}` : ""}</span>{u.p.cj_spu && <span>CJ {u.p.cj_spu}</span>}
           </div>
           {u.flags.map((f, i) => <div key={i} className={f.level === "bad" ? "pt-err" : "pt-info"}>{f.level === "bad" ? "⛔" : "⚠️"} {f.text}</div>)}
-          {editing === u.p.id ? <CostEditor c={c} p={u.p} toast={toast} onDone={() => { setEditing(null); reload(); }} />
-            : <button className="pt-linkbtn pt-small" onClick={() => setEditing(u.p.id)}>✏️ Изменить себестоимость / сроки</button>}
+          {editing === u.p.id ? <ProductForm c={c} p={u.p} s={m.settings} toast={toast} onCancel={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />
+            : <button className="pt-linkbtn pt-small" onClick={() => setEditing(u.p.id)}>✏️ Изменить цену / себестоимость / выплату</button>}
         </section>
       ))}
+      <section className="pt-card">
+        {adding ? <><h3>➕ Новый товар</h3><ProductForm c={c} p={null} s={m.settings} toast={toast} onCancel={() => setAdding(false)} onDone={() => { setAdding(false); reload(); }} /></>
+          : <button className="pt-btn primary wide" onClick={() => setAdding(true)}>➕ Добавить товар</button>}
+      </section>
       <SettingsEditor c={c} m={m} onDone={reload} toast={toast} />
     </>
   );

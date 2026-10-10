@@ -742,3 +742,7 @@ mark.ph { background: #3a2c0a; color: #ffcf6b; border: 1px dashed #8a6a1a; borde
 .bz-tag { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; background: #7f1d1d; color: #fecaca; vertical-align: middle; }
 .bz-ai { margin-top: 10px; }
 @media (max-width: 420px) { .bz-nsm-row { grid-template-columns: 1fr 1fr; } .bz-nsm-row > div:first-child { grid-column: 1 / -1; } }
+.bz-form { margin-top: 8px; }
+.bz-pay input { border-color: var(--accent) !important; }
+.bz-rec { display: grid; gap: 6px; margin: 6px 0 10px; font-size: 13.5px; }
+.bz-rec .pt-btn.sm { margin-left: 6px; }
