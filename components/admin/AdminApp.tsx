@@ -8,9 +8,10 @@ import {
   adminAddAdmin, adminGetDefaultRate, adminListAdmins, adminPartners, adminRemoveAdmin, adminResetPassword, adminSetDefaultRate, adminSetRate, adminSetStatus, adminWhoami,
   loginToEmail, payoutText, PLATFORM_ICON, usd, type AdminPartner, type AdminRow, type PPlatform, type Rate,
 } from "@/lib/partner";
+import { BusinessTab } from "@/components/admin/BusinessTab";
 import { adminDeleteContact, adminListContacts, adminPatchContact, adminSaveContact, contactText, KIND_ICON, KIND_LABEL, type ContactKind, type TeamContact } from "@/lib/contacts";
 
-type Tab = "requests" | "partners" | "contacts" | "admins";
+type Tab = "requests" | "partners" | "business" | "contacts" | "admins";
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" }) : "—");
 const STATUS: Record<string, string> = { PENDING: "⏳ заявка", ACTIVE: "✅ активен", FROZEN: "⛔ заблокирован", REJECTED: "✖ отклонён", BANNED: "⛔ бан", CHURNED: "удалён" };
 const tgUrl = (t: string | null) => (t ? `https://t.me/${t.replace(/^@/, "")}` : null);
@@ -252,6 +253,7 @@ export function AdminApp() {
       <nav className="pt-tabs">
         <button className={tab === "requests" ? "on" : ""} onClick={() => setTab("requests")}>📝 Заявки{pending.length ? ` (${pending.length})` : ""}</button>
         <button className={tab === "partners" ? "on" : ""} onClick={() => setTab("partners")}>👥 Партнёры</button>
+        <button className={tab === "business" ? "on" : ""} onClick={() => setTab("business")}>📈 Бизнес</button>
         <button className={tab === "contacts" ? "on" : ""} onClick={() => setTab("contacts")}>☎️ Контакты</button>
         <button className={tab === "admins" ? "on" : ""} onClick={() => setTab("admins")}>🛡 Админы</button>
       </nav>
@@ -307,6 +309,7 @@ export function AdminApp() {
         </>
       )}
 
+      {tab === "business" && <BusinessTab c={c} toast={toast} />}
       {tab === "contacts" && <ContactsAdmin c={c} toast={toast} />}
 
       {tab === "admins" && (

@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.partner-admin]
 verify_jwt = true
+
+[functions.advisor]
+verify_jwt = true
