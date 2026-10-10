@@ -2,7 +2,8 @@
 // POST /functions/v1/shopify-orders-webhook   (verify_jwt = false; authenticity = X-Shopify-Hmac-Sha256)
 // Attribution is link-only (ref from landing_site / note_attributes); Shopify discount codes are NOT required.
 // Topics: orders/create, orders/paid, orders/updated, orders/cancelled, refunds/create.
-// Until the SHOPIFY_WEBHOOK_SECRET secret is set, EVERY request is rejected with 401.
+// Signing key: env SHOPIFY_WEBHOOK_SECRET, else Supabase Vault "shopify_webhook_secret" (via service-role-only RPC get_app_secret).
+// Until one of them is set, EVERY request is rejected with 401.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -12,7 +13,19 @@ type R = Record<string, any>;
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
 });
-const SALT = Deno.env.get("HASH_SALT") ?? "vf";
+// Secrets: env first, then Vault (cached per isolate). Values are never logged.
+const secretCache = new Map<string, string | null>();
+async function appSecret(envName: string, vaultName: string): Promise<string | null> {
+  const env = Deno.env.get(envName);
+  if (env) return env;
+  if (secretCache.has(vaultName)) return secretCache.get(vaultName)!;
+  const { data, error } = await db.rpc("get_app_secret", { p_name: vaultName });
+  if (error) { console.error("secret lookup failed", vaultName); return null; }
+  const v = typeof data === "string" && data ? data : null;
+  secretCache.set(vaultName, v);
+  return v;
+}
+let SALT = "vf";
 
 const json = (status: number, body: R) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -264,8 +277,9 @@ async function handleRefund(r: R, type: "REFUND" | "CANCEL") {
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
-  const secret = Deno.env.get("SHOPIFY_WEBHOOK_SECRET");
+  const secret = await appSecret("SHOPIFY_WEBHOOK_SECRET", "shopify_webhook_secret");
   if (!secret) return json(401, { error: "webhook secret not configured" });
+  SALT = (await appSecret("HASH_SALT", "hash_salt")) ?? "vf";
 
   const raw = await req.arrayBuffer();
   const given = req.headers.get("x-shopify-hmac-sha256") ?? "";

@@ -10,6 +10,16 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 
+let saltCache: string | null = null;
+async function hashSalt(): Promise<string> {
+  const env = Deno.env.get("HASH_SALT");
+  if (env) return env;
+  if (saltCache) return saltCache;
+  const { data } = await db.rpc("get_app_secret", { p_name: "hash_salt" });
+  saltCache = typeof data === "string" && data ? data : "vf";
+  return saltCache;
+}
+
 async function sha256(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -50,7 +60,7 @@ Deno.serve(async (req) => {
 
   const ua = req.headers.get("user-agent") ?? "";
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim();
-  const salt = Deno.env.get("HASH_SALT") ?? "vf";
+  const salt = await hashSalt();
   const country = (req.headers.get("cf-ipcountry") ?? req.headers.get("x-country") ?? "").slice(0, 2).toUpperCase() || null;
   const isBot = BOT_RE.test(ua) || req.method === "HEAD";
   const now = new Date().toISOString();
