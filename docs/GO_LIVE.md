@@ -50,6 +50,7 @@ Supabase → **Authentication → URL Configuration**:
    - `SHOPIFY_WEBHOOK_SECRET` = ключ из п. 2
    - (рекомендуется) `HASH_SALT` = любая длинная случайная строка — соль для хэшей IP/UA/email
    Через CLI то же самое: `supabase secrets set SHOPIFY_WEBHOOK_SECRET=… HASH_SALT=… --project-ref wdvwinmsdkortvchkgxe`
+  ✅ 2026-10-10: ключ и соль лежат в **Supabase Vault** (`shopify_webhook_secret`, `hash_salt`); функции читают env, иначе Vault через RPC `get_app_secret` (только service_role). Вебхук Order creation проверен: верная подпись → 200 + заказ/атрибуция/комиссия, неверная → 401.
 4. В Shopify у вебхука `Order creation` нажмите **Send test notification** → в Supabase → Edge Functions → `shopify-orders-webhook` → Logs должен быть ответ 200. Тестовый заказ Shopify попадёт в таблицу `order` — удалите его SQL-запросом (см. ниже), если мешает.
 
 > Если вы создаёте вебхук через **приложение** (Settings → Apps → Develop apps), ключ подписи = **API secret key** этого приложения — его и кладите в `SHOPIFY_WEBHOOK_SECRET`.
