@@ -117,9 +117,9 @@ export function CreatorsManage({ store, ws, mine, act }: { store: ManageStore; w
               const st = stats.get(c.id);
               return (
                 <tr key={c.id} className={c.status === "PAUSED" ? "dimrow" : ""}>
-                  <td>@{c.nick}{c.status === "PAUSED" && <span className="an-pill">пауза</span>}</td>
+                  <td>@{c.nick}{c.self_signup && <span className="an-pill" title="Зарегистрировался сам в /partner">кабинет</span>}{c.status === "PAUSED" && <span className="an-pill">пауза</span>}</td>
                   <td className="dim"><code>{c.promo_code}</code></td>
-                  <td className="dim">{c.contact || "—"}</td>
+                  <td className="dim">{c.contact || "—"}{c.email && <div style={{ fontSize: 11 }}>{c.email}</div>}</td>
                   <td className="dim">{(["IG", "TT", "YT"] as const).filter((p) => c.handles[p]).map((p) => `${p} ${c.handles[p]}`).join(" · ") || "—"}</td>
                   <td>{c.payout_rule ? ruleText(c.payout_rule, c.payout_value) : <span className="dim">как в Настройках</span>}</td>
                   <td className="num">{ws.links.filter((l) => l.creator_id === c.id).length}</td>

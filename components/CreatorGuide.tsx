@@ -1,4 +1,5 @@
 import fs from "fs";
+import Link from "next/link";
 import path from "path";
 import { inline, parse, renderBlocks, sections } from "@/lib/miniMd";
 
@@ -21,12 +22,17 @@ export function CreatorGuide() {
           <div className="sub">Likky · зарабатывай на коротких роликах</div>
         </div>
         <div className="hdr-links">
+          <Link className="hdr-btn accent" href="/partner/">🔑 Кабинет</Link>
           <a className="hdr-btn" href="#steps">📋 Шаги</a>
-          <a className="hdr-btn accent" href="#faq">❓ FAQ</a>
+          <a className="hdr-btn" href="#faq">❓ FAQ</a>
         </div>
       </header>
       <main className="an-main guide-main">
-        <section className="an-card cg-hero">{renderBlocks(introBody, "intro")}</section>
+        <section className="an-card cg-hero">
+          {renderBlocks(introBody, "intro")}
+          <Link className="guide-cta" href="/partner/">🔑 Войти в кабинет партнёра →</Link>
+          <p className="dim" style={{ marginTop: 8, fontSize: 12.5 }}>Там твои ссылки, клики, продажи и выплаты. Вход по email, без пароля.</p>
+        </section>
         <div id="steps" />
         {instr.sections.map((s, i) => (
           <section className="an-card cg-step" key={i}>

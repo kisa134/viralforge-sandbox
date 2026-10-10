@@ -211,9 +211,12 @@ async function handleOrder(o: R, topic: string) {
   if (status === "REFUNDED" || status === "VOIDED") return { orderId, attributed: method, commission: "skipped (refunded/voided)" };
 
   // Commission
+  // Payout precedence: creator override → offer payout (when set) → global settings
   const creator = unwrap(await db.from("creator").select("payout_rule, payout_value").eq("id", creatorId).single(), "creator") as R;
-  const rule: string = creator.payout_rule ?? s.payout_rule;
-  const value: number | null = creator.payout_rule ? (creator.payout_value === null ? null : Number(creator.payout_value)) : (s.payout_value === null ? null : Number(s.payout_value));
+  const offer = offerId ? unwrap(await db.from("offer").select("payout_rule, payout_value").eq("id", offerId).maybeSingle(), "offer payout") as R | null : null;
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const rule: string = creator.payout_rule ?? (offer && offer.payout_value !== null ? offer.payout_rule : s.payout_rule);
+  const value: number | null = creator.payout_rule ? num(creator.payout_value) : offer && offer.payout_value !== null ? num(offer.payout_value) : num(s.payout_value);
   const net = row.subtotal_cents; // Shopify subtotal_price is already after discounts
   let amount: number | null = null, basis: number | null = null;
   if (value !== null) {
