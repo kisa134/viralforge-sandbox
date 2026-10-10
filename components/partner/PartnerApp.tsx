@@ -271,7 +271,7 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
 }
 
 // ───────────────────────── Stats tab ─────────────────────────
-function StatsTab({ stats, range, setRange, catalog }: { stats: Stats | null; range: string; setRange: (r: string) => void; catalog: CatalogItem[] }) {
+function StatsTab({ stats, range, setRange, catalog, onRefresh }: { stats: Stats | null; range: string; setRange: (r: string) => void; catalog: CatalogItem[]; onRefresh: () => void }) {
   const t = stats?.totals;
   const rateKnown = catalog.some((p) => p.payout_value !== null);
   return (
@@ -279,6 +279,7 @@ function StatsTab({ stats, range, setRange, catalog }: { stats: Stats | null; ra
       <div className="pt-seg">
         {[["7", "7 дней"], ["30", "30 дней"], ["all", "Всё время"]].map(([k, l]) => <button key={k} className={range === k ? "on" : ""} onClick={() => setRange(k)}>{l}</button>)}
       </div>
+      <button className="pt-linkbtn pt-small" onClick={onRefresh}>🔄 Обновить</button>
       {!rateKnown && <div className="pt-info">Ставка за продажу уточняется — продажи уже считаются, сумма начислится, когда ставка будет задана.</div>}
       <div className="pt-kpis">
         <div className="pt-kpi"><span>Клики</span><b>{t?.clicks ?? 0}</b></div>
@@ -392,11 +393,11 @@ export function PartnerApp() {
     <>
       <nav className="pt-tabs">
         <button className={tab === "links" ? "on" : ""} onClick={() => setTab("links")}>🔗 Ссылки</button>
-        <button className={tab === "stats" ? "on" : ""} onClick={() => setTab("stats")}>📊 Статистика</button>
+        <button className={tab === "stats" ? "on" : ""} onClick={() => { setTab("stats"); loadStats(); }}>📊 Статистика</button>
         <button className={tab === "profile" ? "on" : ""} onClick={() => setTab("profile")}>👤 Профиль</button>
       </nav>
       {tab === "links" && <LinksTab c={c} me={me} catalog={catalog} stats={stats} onCreated={loadStats} />}
-      {tab === "stats" && <StatsTab stats={stats} range={range} setRange={setRange} catalog={catalog} />}
+      {tab === "stats" && <StatsTab stats={stats} range={range} setRange={setRange} catalog={catalog} onRefresh={loadStats} />}
       {tab === "profile" && <ProfileForm c={c} me={me} email={isInternalEmail(session.user.email) ? "" : session.user.email ?? ""} onSaved={setMe} />}
     </>
   );

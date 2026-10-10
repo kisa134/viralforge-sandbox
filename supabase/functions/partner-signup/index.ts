@@ -1,13 +1,14 @@
 // Partner self-signup with LOGIN + PASSWORD (no email). POST JSON {login, password, telegram, handles?, website?(honeypot)}
 // Public (verify_jwt = false). Uses the service role to create a confirmed auth user with an internal, never-delivered
 // address <login>@partners.likky.invalid (app_metadata.login = login) and the creator row. Never sends email.
-// Abuse protection: honeypot field, per-IP limits (5 successful signups / hour, 20 attempts / hour).
+// Abuse protection: honeypot field, per-IP limits (5 successful signups / hour, 20 attempts / hour) and per-subnet limits (10 / 40).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 export const PARTNER_EMAIL_DOMAIN = "partners.likky.invalid";
 const LOGIN_RE = /^[a-z0-9_]{3,24}$/;
-const MAX_OK_PER_HOUR = 5, MAX_TRIES_PER_HOUR = 20;
+const MAX_OK_PER_HOUR = 5, MAX_TRIES_PER_HOUR = 20;          // per IP
+const NET_MAX_OK_PER_HOUR = 10, NET_MAX_TRIES_PER_HOUR = 40;  // per /24 (IPv4) or /48 (IPv6)
 const RESERVED = new Set(["admin", "root", "likky", "support", "help", "system", "test_admin", "moderator"]);
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -39,12 +40,17 @@ Deno.serve(async (req) => {
   const { data: recent, error: rErr } = await db.from("signup_attempt").select("ok").eq("ip_hash", ipHash).gte("created_at", since).limit(200);
   if (rErr) { console.error("throttle", rErr.message); return fail(500, "Сервис временно недоступен, попробуйте позже"); }
   const okCount = (recent ?? []).filter((r) => r.ok).length;
-  if (okCount >= MAX_OK_PER_HOUR || (recent ?? []).length >= MAX_TRIES_PER_HOUR) {
+  const net = ip.includes(":") ? ip.split(":").slice(0, 3).join(":") : ip.split(".").slice(0, 3).join(".");
+  const netHash = await sha256("signup-net:" + net);
+  const { data: netRecent } = await db.from("signup_attempt").select("ok").eq("net_hash", netHash).gte("created_at", since).limit(500);
+  const netOk = (netRecent ?? []).filter((r) => r.ok).length;
+  if (okCount >= MAX_OK_PER_HOUR || (recent ?? []).length >= MAX_TRIES_PER_HOUR
+      || netOk >= NET_MAX_OK_PER_HOUR || (netRecent ?? []).length >= NET_MAX_TRIES_PER_HOUR) {
     return fail(429, "Слишком много регистраций с этого устройства. Попробуйте через час.");
   }
 
   const login = clean(body.login, 40).toLowerCase().replace(/^@/, "");
-  const record = async (ok: boolean) => { await db.from("signup_attempt").insert({ ip_hash: ipHash, ok, login: login.slice(0, 24) || null }); };
+  const record = async (ok: boolean) => { await db.from("signup_attempt").insert({ ip_hash: ipHash, net_hash: netHash, ok, login: login.slice(0, 24) || null }); };
 
   // Honeypot: bots fill hidden fields. Pretend success-ish without creating anything.
   if (clean(body.website, 200)) { await record(false); return fail(400, "Не получилось. Обновите страницу и попробуйте снова."); }
