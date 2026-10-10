@@ -11,5 +11,8 @@ export function sb(): SupabaseClient | null {
   if (!client) client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, detectSessionInUrl: true } });
   return client;
 }
-/** Short tracked link (База mode only) served by the `r` edge function (logs the click, then 302 to the product page with ?ref=). */
-export const shortLink = (token: string) => (supabaseConfigured ? `${SUPABASE_URL}/functions/v1/r?s=${encodeURIComponent(token)}` : null);
+/** Public base for short creator links: https://go.likky.store/<slug> (GitHub Pages repo kisa134/likky-go → forwards to the `r` edge function). */
+export const SHORT_LINK_BASE = (process.env.NEXT_PUBLIC_SHORT_LINK_BASE ?? "https://go.likky.store").replace(/\/+$/, "");
+/** Short tracked link (База mode only): go.likky.store/<slug> → `r` edge function (logs the click, then 302 to the product page with ?ref=).
+ *  Old links …/functions/v1/r?s=<slug> keep working. */
+export const shortLink = (token: string) => (supabaseConfigured ? `${SHORT_LINK_BASE}/${encodeURIComponent(token)}` : null);
