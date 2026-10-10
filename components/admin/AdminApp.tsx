@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { sb, supabaseConfigured } from "@/lib/analytics/sbClient";
 import {
   adminAddAdmin, adminGetDefaultRate, adminListAdmins, adminPartners, adminRemoveAdmin, adminResetPassword, adminSetDefaultRate, adminSetRate, adminSetStatus, adminWhoami,
   loginToEmail, payoutText, PLATFORM_ICON, usd, type AdminPartner, type AdminRow, type PPlatform, type Rate,
 } from "@/lib/partner";
+import { adminDeleteContact, adminListContacts, adminPatchContact, adminSaveContact, contactText, KIND_ICON, KIND_LABEL, type ContactKind, type TeamContact } from "@/lib/contacts";
 
-type Tab = "requests" | "partners" | "admins";
+type Tab = "requests" | "partners" | "contacts" | "admins";
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" }) : "—");
 const STATUS: Record<string, string> = { PENDING: "⏳ заявка", ACTIVE: "✅ активен", FROZEN: "⛔ заблокирован", REJECTED: "✖ отклонён", BANNED: "⛔ бан", CHURNED: "удалён" };
 const tgUrl = (t: string | null) => (t ? `https://t.me/${t.replace(/^@/, "")}` : null);
@@ -54,6 +55,82 @@ function AdminLogin({ c }: { c: SupabaseClient }) {
       <button className="pt-btn primary wide" disabled={!login || !pw || busy} onClick={go}>{busy ? "Вхожу…" : "Войти"}</button>
       {err && <div className="pt-err">{err}</div>}
     </section>
+  );
+}
+
+const KIND_HINT: Record<ContactKind, string> = { telegram: "@username", whatsapp: "+971 50 123 4567", email: "team@likky.store", phone: "+971 50 123 4567", instagram: "@likky.store", other: "https://… или текст" };
+const EMPTY_CONTACT = { kind: "telegram" as ContactKind, label: "", value: "", url: "", is_primary: false, active: true };
+
+function ContactsAdmin({ c, toast }: { c: SupabaseClient; toast: (m: string) => void }) {
+  const [list, setList] = useState<TeamContact[]>([]);
+  const [edit, setEdit] = useState<(typeof EMPTY_CONTACT & { id?: number }) | null>(null);
+  const toastRef = useRef(toast); toastRef.current = toast;
+  const load = useCallback(async () => { try { setList(await adminListContacts(c)); } catch (e) { toastRef.current("Ошибка: " + (e as Error).message); } }, [c]);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => {
+    if (!edit) return;
+    if (!edit.value.trim()) { toast("Заполните контакт"); return; }
+    try {
+      const sort = edit.id ? list.find((x) => x.id === edit.id)?.sort ?? 0 : (list.reduce((m, x) => Math.max(m, x.sort), 0) + 10);
+      await adminSaveContact(c, { ...edit, label: edit.label.trim() || null, url: edit.kind === "other" ? edit.url.trim() || null : null, sort });
+      toast(edit.id ? "Контакт сохранён" : "Контакт добавлен"); setEdit(null); load();
+    } catch (e) { toast("Ошибка: " + (e as Error).message); }
+  };
+  const move = async (i: number, d: -1 | 1) => {
+    const ord = [...list].sort((a, b) => a.sort - b.sort || a.id - b.id);
+    const idx = ord.findIndex((x) => x.id === list[i].id), j = idx + d;
+    if (j < 0 || j >= ord.length) return;
+    [ord[idx], ord[j]] = [ord[j], ord[idx]];
+    try { await Promise.all(ord.map((x, k) => (x.sort !== (k + 1) * 10 ? adminPatchContact(c, x.id, { sort: (k + 1) * 10 }) : null))); load(); } catch (e) { toast("Ошибка: " + (e as Error).message); }
+  };
+  const ordered = [...list].sort((a, b) => a.sort - b.sort || a.id - b.id);
+  return (
+    <>
+      <section className="pt-card">
+        <h3>☎️ Наши контакты</h3>
+        <p className="pt-dim pt-small">Показываются партнёрам в кабинете (заявка, блокировка, «забыл пароль», подвал) и в инструкции. «Основной» — первым. Скрытые не видны никому, кроме админов.</p>
+        {!list.length && <p className="pt-dim">Контактов пока нет — партнёры видят «контакты скоро появятся».</p>}
+        <div className="pt-links">
+          {ordered.map((x, i) => (
+            <div className={`pt-link ad-contact ${x.active ? "" : "ad-off"}`} key={x.id}>
+              <div>{KIND_ICON[x.kind]} <b>{x.label || KIND_LABEL[x.kind]}</b>: {x.url ? <a href={x.url} target="_blank" rel="noreferrer">{contactText(x)}</a> : contactText(x)}
+                {x.is_primary && <span className="ad-st st-ACTIVE" style={{ marginLeft: 6 }}>⭐ основной</span>}{!x.active && <span className="pt-dim"> · скрыт</span>}</div>
+              <div className="pt-row">
+                <button className="pt-btn sm" disabled={i === 0} onClick={() => move(list.indexOf(x), -1)} aria-label="Выше">↑</button>
+                <button className="pt-btn sm" disabled={i === ordered.length - 1} onClick={() => move(list.indexOf(x), 1)} aria-label="Ниже">↓</button>
+                {!x.is_primary && <button className="pt-btn sm" onClick={async () => { try { await adminPatchContact(c, x.id, { is_primary: true }); toast("Основной контакт обновлён"); load(); } catch (e) { toast("Ошибка: " + (e as Error).message); } }}>⭐ Основной</button>}
+                <button className="pt-btn sm" onClick={async () => { try { await adminPatchContact(c, x.id, { active: !x.active }); load(); } catch (e) { toast("Ошибка: " + (e as Error).message); } }}>{x.active ? "🙈 Скрыть" : "👁 Показать"}</button>
+                <button className="pt-btn sm" onClick={() => setEdit({ id: x.id, kind: x.kind, label: x.label ?? "", value: x.value, url: x.url ?? "", is_primary: x.is_primary, active: x.active })}>✏️ Изменить</button>
+                <button className="pt-btn sm" onClick={async () => { if (!confirm(`Удалить контакт «${x.label || KIND_LABEL[x.kind]}: ${x.value}»?`)) return; try { await adminDeleteContact(c, x.id); toast("Контакт удалён"); load(); } catch (e) { toast("Ошибка: " + (e as Error).message); } }}>🗑 Удалить</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {!edit && <button className="pt-btn primary wide" style={{ marginTop: 10 }} onClick={() => setEdit({ ...EMPTY_CONTACT, is_primary: list.length === 0 })}>➕ Добавить контакт</button>}
+      </section>
+      {edit && (
+        <section className="pt-card ad-contact" id="contact-form">
+          <h3>{edit.id ? "Изменить контакт" : "Новый контакт"}</h3>
+          <label className="pt-label">Тип
+            <select className="pt-input" name="c_kind" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as ContactKind })}>
+              {(Object.keys(KIND_LABEL) as ContactKind[]).map((k) => <option key={k} value={k}>{KIND_ICON[k]} {KIND_LABEL[k]}</option>)}
+            </select></label>
+          <label className="pt-label">Подпись (необязательно)
+            <input className="pt-input" name="c_label" maxLength={60} value={edit.label} onChange={(e) => setEdit({ ...edit, label: e.target.value })} placeholder="напр. «По выплатам», «Менеджер»" /></label>
+          <label className="pt-label">Контакт
+            <input className="pt-input" name="c_value" maxLength={200} autoCapitalize="none" value={edit.value} onChange={(e) => setEdit({ ...edit, value: e.target.value })} placeholder={KIND_HINT[edit.kind]} /></label>
+          {edit.kind === "other" && <label className="pt-label">Ссылка (необязательно)
+            <input className="pt-input" name="c_url" maxLength={300} autoCapitalize="none" value={edit.url} onChange={(e) => setEdit({ ...edit, url: e.target.value })} placeholder="https://…" /></label>}
+          {edit.kind !== "other" && <p className="pt-dim pt-small">Ссылка соберётся сама ({edit.kind === "telegram" ? "t.me/…" : edit.kind === "whatsapp" ? "wa.me/…" : edit.kind === "email" ? "mailto:" : edit.kind === "phone" ? "tel:" : "instagram.com/…"}).</p>}
+          <label className="pt-check"><input type="checkbox" checked={edit.is_primary} onChange={(e) => setEdit({ ...edit, is_primary: e.target.checked })} /> ⭐ Основной (показывать первым)</label>
+          <label className="pt-check"><input type="checkbox" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Показывать партнёрам</label>
+          <div className="pt-row">
+            <button className="pt-btn primary" onClick={save}>💾 Сохранить</button>
+            <button className="pt-btn" onClick={() => setEdit(null)}>Отмена</button>
+          </div>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -175,6 +252,7 @@ export function AdminApp() {
       <nav className="pt-tabs">
         <button className={tab === "requests" ? "on" : ""} onClick={() => setTab("requests")}>📝 Заявки{pending.length ? ` (${pending.length})` : ""}</button>
         <button className={tab === "partners" ? "on" : ""} onClick={() => setTab("partners")}>👥 Партнёры</button>
+        <button className={tab === "contacts" ? "on" : ""} onClick={() => setTab("contacts")}>☎️ Контакты</button>
         <button className={tab === "admins" ? "on" : ""} onClick={() => setTab("admins")}>🛡 Админы</button>
       </nav>
       {newPw && (
@@ -228,6 +306,8 @@ export function AdminApp() {
           <p className="pt-note">💵 сумма заказов · 💰 начислено · 💸 выплачено. Подробная аналитика и выплаты — в <Link href="/analytics">/analytics</Link> (режим «База»).</p>
         </>
       )}
+
+      {tab === "contacts" && <ContactsAdmin c={c} toast={toast} />}
 
       {tab === "admins" && (
         <section className="pt-card">

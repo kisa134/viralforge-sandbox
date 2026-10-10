@@ -1,6 +1,7 @@
 import fs from "fs";
 import Link from "next/link";
 import path from "path";
+import { ContactsList } from "@/components/Contacts";
 import { inline, parse, renderBlocks, sections } from "@/lib/miniMd";
 
 function load(name: string) {
@@ -25,6 +26,7 @@ export function CreatorGuide() {
           <Link className="hdr-btn accent" href="/partner/">🔑 Кабинет</Link>
           <a className="hdr-btn" href="#steps">📋 Шаги</a>
           <a className="hdr-btn" href="#faq">❓ FAQ</a>
+          <a className="hdr-btn" href="#contacts">📬 Контакты</a>
         </div>
       </header>
       <main className="an-main guide-main">
@@ -51,6 +53,9 @@ export function CreatorGuide() {
               </details>
             ))}
           </div>
+        </section>
+        <section className="an-card" id="contacts">
+          <ContactsList title="📬 Наши контакты" />
         </section>
       </main>
       <footer className="an-footer">Likky · likky.store · Не нашёл ответ — пиши нам, ответим.</footer>

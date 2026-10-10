@@ -74,7 +74,6 @@ export function captionFor(handle: string, platform: PPlatform) {
 /** Internal, never-delivered address used for login-based accounts (see supabase/functions/partner-signup). */
 export const PARTNER_EMAIL_DOMAIN = "partners.likky.invalid";
 /** Founder's Telegram for support/password recovery — placeholder until the founder sets it. */
-export const CONTACT_TG = "@контакт";
 export const normLogin = (s: string) => s.trim().toLowerCase().replace(/^@/, "");
 /** "mira" → "mira@partners.likky.invalid"; a full email is passed through (legacy email accounts). */
 export const loginToEmail = (login: string) => (login.includes("@") ? login.trim().toLowerCase() : `${normLogin(login)}@${PARTNER_EMAIL_DOMAIN}`);

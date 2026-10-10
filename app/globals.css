@@ -689,3 +689,15 @@ mark.ph { background: #3a2c0a; color: #ffcf6b; border: 1px dashed #8a6a1a; borde
 .ad-newpw { border-color: #5a3a18; }
 .ad-admin { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .pt-rate { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: #0f2a1a; border: 1px solid #1f6b3e; color: #b8f5cf; font-size: 14px; line-height: 1.45; }
+/* team contacts */
+.tc-link { color: #7cc4ff; text-decoration: underline; text-underline-offset: 2px; word-break: break-word; }
+.tc-dim { opacity: .7; }
+.tc-box { margin: 14px 0 4px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); text-align: left; }
+.tc-title { font-weight: 700; margin-bottom: 6px; font-size: 14px; }
+.tc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.ad-contact { display: grid; gap: 8px; }
+.ad-contact .pt-row { flex-wrap: wrap; gap: 6px; }
+.pt-btn.sm { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+.pt-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; }
+.pt-check input { width: 18px; height: 18px; }
+.pt-foot .tc-box { margin: 0 auto 10px; max-width: 520px; }

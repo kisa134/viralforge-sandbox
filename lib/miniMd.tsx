@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
+import { ContactsInline } from "@/components/Contacts";
 
 /** Tiny Markdown subset renderer (build-time, server component). Supports:
  *  #/##/### headings, paragraphs, "- " lists, "> " quotes, "---", **bold**, *italic*, `code`,
- *  and highlights [placeholders] so they are easy to spot. */
+ *  highlights [placeholders] so they are easy to spot, and renders {{contacts}} as live team contacts (client). */
 
 export function inline(text: string, keyBase = "i"): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\])/g;
+  const re = /(\{\{contacts\}\}|\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\])/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let n = 0;
@@ -14,7 +15,8 @@ export function inline(text: string, keyBase = "i"): ReactNode[] {
     if (m.index > last) out.push(text.slice(last, m.index));
     const t = m[0];
     const k = `${keyBase}-${n++}`;
-    if (t.startsWith("**")) out.push(<b key={k}>{inline(t.slice(2, -2), k)}</b>);
+    if (t === "{{contacts}}") out.push(<ContactsInline key={k} />);
+    else if (t.startsWith("**")) out.push(<b key={k}>{inline(t.slice(2, -2), k)}</b>);
     else if (t.startsWith("`")) out.push(<code key={k}>{t.slice(1, -1)}</code>);
     else if (t.startsWith("[")) out.push(<mark key={k} className="ph">{t}</mark>);
     else out.push(<i key={k}>{inline(t.slice(1, -1), k)}</i>);

@@ -5,8 +5,9 @@ import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { sb, shortLink, supabaseConfigured, SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/analytics/sbClient";
+import { ContactsInline, ContactsList } from "@/components/Contacts";
 import {
-  captionFor, CONTACT_TG, createLink, getCatalog, getMe, getStats, isInternalEmail, loginToEmail, normLogin, payoutCents, payoutText, rateHeadline, PLATFORM_ICON, PLATFORM_LABEL, register, signupPartner, usd,
+  captionFor, createLink, getCatalog, getMe, getStats, isInternalEmail, loginToEmail, normLogin, payoutCents, payoutText, rateHeadline, PLATFORM_ICON, PLATFORM_LABEL, register, signupPartner, usd,
   type CatalogItem, type NewLink, type PPlatform, type Profile, type Stats,
 } from "@/lib/partner";
 
@@ -102,7 +103,7 @@ function AuthView({ c }: { c: SupabaseClient }) {
         ? <button className="pt-btn primary wide" disabled={!loginOk || !pw || busy} onClick={doLogin}>{busy ? "Вхожу…" : "Войти"}</button>
         : <button className="pt-btn primary wide" disabled={!loginOk || !pw || !pw2 || busy} onClick={doSignup}>{busy ? "Создаю аккаунт…" : "Зарегистрироваться"}</button>}
       {err && <div className="pt-err">{err}</div>}
-      <p className="pt-note">🔐 Запомни пароль — восстановить его можно только через {CONTACT_TG} в Telegram. Почта не нужна.</p>
+      <p className="pt-note">🔐 Запомни пароль — восстановить его можно только через нас: <ContactsInline />. Почта не нужна.</p>
       {mode === "signup" && <p className="pt-note">После регистрации заявку проверит команда Likky — обычно быстро. Потом откроются товары и ссылки.</p>}
       <p className="pt-note"><Link href="/guide/creator">📋 Как это работает — инструкция и FAQ</Link></p>
     </section>
@@ -118,9 +119,9 @@ function StatusScreen({ me, onSignOut }: { me: Profile; onSignOut: () => void })
       {pending ? (
         <>
           <p>Привет, <b>@{me.nick}</b>! Мы получили твою заявку. Как только команда Likky её одобрит, здесь появятся товары и твои ссылки.</p>
-          <p>Чтобы ускорить — напиши {CONTACT_TG} в Telegram: свой логин <b>{me.nick}</b> и ссылку на свой аккаунт.</p>
+          <p>Чтобы ускорить — напиши нам свой логин <b>{me.nick}</b> и ссылку на свой аккаунт: <ContactsInline />.</p>
         </>
-      ) : <p>Доступ к кабинету сейчас закрыт. Если это ошибка — напиши {CONTACT_TG} в Telegram.</p>}
+      ) : <p>Доступ к кабинету сейчас закрыт. Если это ошибка — напиши нам: <ContactsInline />.</p>}
       <p className="pt-note"><Link href="/guide/creator">📋 Пока можно прочитать инструкцию и FAQ</Link></p>
       <button className="pt-btn wide" onClick={onSignOut}>Выйти</button>
     </section>
@@ -414,7 +415,8 @@ export function PartnerApp() {
         {err && <div className="pt-err">Ошибка: {err}</div>}
         {body}
       </main>
-      <footer className="pt-foot"><Link href="/guide/creator">📋 Инструкция и FAQ</Link> · likky.store</footer>
+      <footer className="pt-foot"><ContactsList />
+        <Link href="/guide/creator">📋 Инструкция и FAQ</Link> · likky.store</footer>
     </div>
   );
 }
