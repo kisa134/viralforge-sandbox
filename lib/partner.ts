@@ -52,3 +52,49 @@ export function captionFor(handle: string, platform: PPlatform) {
     dm: (link: string) => `Hey! Here's the link 💛\n${link}`,
   };
 }
+
+// ───────── Login + password (no email) ─────────
+/** Internal, never-delivered address used for login-based accounts (see supabase/functions/partner-signup). */
+export const PARTNER_EMAIL_DOMAIN = "partners.likky.invalid";
+/** Founder's Telegram for support/password recovery — placeholder until the founder sets it. */
+export const CONTACT_TG = "@контакт";
+export const normLogin = (s: string) => s.trim().toLowerCase().replace(/^@/, "");
+/** "mira" → "mira@partners.likky.invalid"; a full email is passed through (legacy email accounts). */
+export const loginToEmail = (login: string) => (login.includes("@") ? login.trim().toLowerCase() : `${normLogin(login)}@${PARTNER_EMAIL_DOMAIN}`);
+export const isInternalEmail = (email: string | null | undefined) => Boolean(email && email.endsWith("@" + PARTNER_EMAIL_DOMAIN));
+
+export async function signupPartner(supabaseUrl: string, apikey: string, p: { login: string; password: string; telegram: string; handles: Partial<Record<PPlatform, string>>; website: string }) {
+  let res: Response;
+  try {
+    res = await fetch(`${supabaseUrl}/functions/v1/partner-signup`, { method: "POST", headers: { "Content-Type": "application/json", apikey }, body: JSON.stringify(p) });
+  } catch { throw new Error("Нет связи с сервером. Проверьте интернет и попробуйте ещё раз."); }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.ok) throw new Error(j.error || "Не удалось зарегистрироваться. Попробуйте позже.");
+  return j as { ok: true; login: string; status: string };
+}
+
+// ───────── Admin RPCs ─────────
+export type AdminPartner = {
+  id: string; login: string; nick: string; telegram: string | null; handles: Partial<Record<PPlatform, string>>; status: string;
+  self_signup: boolean; has_account: boolean; created_at: string; payout_rule: string | null; payout_value: number | null;
+  links: number; clicks: number; orders: number; revenue_cents: number; earned_cents: number; paid_cents: number;
+};
+export type AdminRow = { id: number; login: string | null; email: string | null; created_at: string };
+export const adminWhoami = (c: SupabaseClient) => rpc<{ is_admin: boolean; login: string | null; email: string | null }>(c, "admin_whoami");
+export const adminPartners = async (c: SupabaseClient) => (await rpc<AdminPartner[] | null>(c, "admin_partners")) ?? [];
+export const adminSetStatus = (c: SupabaseClient, id: string, status: string) => rpc<null>(c, "admin_set_partner_status", { p_creator: id, p_status: status });
+export const adminSetRate = (c: SupabaseClient, id: string, rule: string | null, value: number | null) => rpc<null>(c, "admin_set_partner_rate", { p_creator: id, p_rule: rule, p_value: value });
+export const adminListAdmins = async (c: SupabaseClient) => (await rpc<AdminRow[] | null>(c, "admin_list_admins")) ?? [];
+export const adminAddAdmin = (c: SupabaseClient, login: string) => rpc<null>(c, "admin_add_admin", { p_login: login });
+export const adminRemoveAdmin = (c: SupabaseClient, id: number) => rpc<null>(c, "admin_remove_admin", { p_id: id });
+export async function adminResetPassword(c: SupabaseClient, creatorId: string, password: string) {
+  const { data, error } = await c.functions.invoke("partner-admin", { body: { action: "reset_password", creator_id: creatorId, password } });
+  if (error) {
+    // supabase-js wraps non-2xx; try to read our JSON error
+    const ctx = (error as { context?: Response }).context;
+    const j = ctx && typeof ctx.json === "function" ? await ctx.json().catch(() => null) : null;
+    throw new Error(j?.error || error.message);
+  }
+  if (!data?.ok) throw new Error(data?.error || "Не удалось сменить пароль");
+  return data as { ok: true; login: string };
+}

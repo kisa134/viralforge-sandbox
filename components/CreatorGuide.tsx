@@ -31,7 +31,7 @@ export function CreatorGuide() {
         <section className="an-card cg-hero">
           {renderBlocks(introBody, "intro")}
           <Link className="guide-cta" href="/partner/">🔑 Войти в кабинет партнёра →</Link>
-          <p className="dim" style={{ marginTop: 8, fontSize: 12.5 }}>Там твои ссылки, клики, продажи и выплаты. Вход по email, без пароля.</p>
+          <p className="dim" style={{ marginTop: 8, fontSize: 12.5 }}>Регистрация по логину и паролю — почта не нужна. Там твои ссылки, клики, продажи и выплаты.</p>
         </section>
         <div id="steps" />
         {instr.sections.map((s, i) => (

@@ -3,10 +3,10 @@
 import Link from "next/link";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Session, SupabaseClient, EmailOtpType } from "@supabase/supabase-js";
-import { sb, shortLink, supabaseConfigured } from "@/lib/analytics/sbClient";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import { sb, shortLink, supabaseConfigured, SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/analytics/sbClient";
 import {
-  captionFor, createLink, getCatalog, getMe, getStats, payoutText, PLATFORM_ICON, PLATFORM_LABEL, register, usd,
+  captionFor, CONTACT_TG, createLink, getCatalog, getMe, getStats, isInternalEmail, loginToEmail, normLogin, payoutText, PLATFORM_ICON, PLATFORM_LABEL, register, signupPartner, usd,
   type CatalogItem, type NewLink, type PPlatform, type Profile, type Stats,
 } from "@/lib/partner";
 
@@ -29,49 +29,38 @@ function Qr({ value, size = 180 }: { value: string; size?: number }) {
   return src ? <img className="pt-qr" src={src} width={size} height={size} alt="QR-код ссылки" /> : null;
 }
 
-// ───────────────────────── Login ─────────────────────────
-function LoginView({ c, initialError }: { c: SupabaseClient; initialError: string }) {
-  const [email, setEmail] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(initialError);
-  const [showPaste, setShowPaste] = useState(false);
-  const [pasted, setPasted] = useState("");
-  const [pwMode, setPwMode] = useState(false);
+// ───────────────────────── Login / Registration (login + password, no email) ─────────────────────────
+function AuthView({ c }: { c: SupabaseClient }) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [login, setLogin] = useState("");
   const [pw, setPw] = useState("");
-  const loginPw = async () => {
-    setBusy(true); setErr("");
-    const { error } = await c.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: pw });
-    setBusy(false);
-    if (error) setErr("Неверный email или пароль.");
-  };
+  const [pw2, setPw2] = useState("");
+  const [tg, setTg] = useState("");
+  const [h, setH] = useState<Partial<Record<PPlatform, string>>>({});
+  const [hp, setHp] = useState(""); // honeypot
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const l = normLogin(login);
+  const loginOk = /^[a-z0-9_]{3,24}$/.test(l) || (mode === "login" && login.includes("@"));
 
-  const send = async () => {
+  const doLogin = async () => {
     setBusy(true); setErr("");
-    const { error } = await c.auth.signInWithOtp({ email: email.trim().toLowerCase(), options: { shouldCreateUser: true, emailRedirectTo: window.location.origin + window.location.pathname } });
+    const { error } = await c.auth.signInWithPassword({ email: loginToEmail(login), password: pw });
     setBusy(false);
-    if (error) setErr(/rate|limit|seconds/i.test(error.message) ? "Слишком много писем подряд. Подождите минуту и попробуйте снова." : error.message);
-    else setStep("code");
+    if (error) setErr(/rate|many/i.test(error.message) ? "Слишком много попыток. Подождите пару минут." : "Неверный логин или пароль.");
   };
-  const verifyCode = async () => {
-    setBusy(true); setErr("");
-    const { error } = await c.auth.verifyOtp({ email: email.trim().toLowerCase(), token: code.trim(), type: "email" });
-    setBusy(false);
-    if (error) setErr("Код не подошёл или устарел. Запросите новый.");
-  };
-  const verifyLink = async () => {
+  const doSignup = async () => {
     setErr("");
+    if (pw.length < 8) return setErr("Пароль: минимум 8 символов");
+    if (pw !== pw2) return setErr("Пароли не совпадают");
+    if (!tg.trim()) return setErr("Укажи Telegram — так мы с тобой свяжемся");
+    setBusy(true);
     try {
-      const u = new URL(pasted.trim());
-      const token = u.searchParams.get("token") ?? u.searchParams.get("token_hash");
-      const type = (u.searchParams.get("type") ?? "magiclink") as EmailOtpType;
-      if (!token) throw new Error("no token");
-      setBusy(true);
-      const { error } = await c.auth.verifyOtp({ token_hash: token, type });
-      setBusy(false);
-      if (error) setErr("Ссылка устарела или уже использована. Запросите новое письмо.");
-    } catch { setBusy(false); setErr("Это не похоже на ссылку из письма. Скопируйте ссылку кнопки «Войти» целиком."); }
+      await signupPartner(SUPABASE_URL, SUPABASE_ANON_KEY, { login: l, password: pw, telegram: tg, handles: h, website: hp });
+      const { error } = await c.auth.signInWithPassword({ email: loginToEmail(l), password: pw });
+      if (error) throw new Error("Аккаунт создан, но войти не получилось — попробуй на вкладке «Вход».");
+    } catch (e) { setErr((e as Error).message); }
+    setBusy(false);
   };
 
   return (
@@ -79,45 +68,61 @@ function LoginView({ c, initialError }: { c: SupabaseClient; initialError: strin
       <div className="pt-emoji">👋</div>
       <h2>Кабинет партнёра Likky</h2>
       <p className="pt-dim">Твои ссылки, клики, продажи и выплаты — в одном месте.</p>
-      {step === "email" ? (
+      <div className="pt-seg two">
+        <button className={mode === "login" ? "on" : ""} onClick={() => { setMode("login"); setErr(""); }}>Вход</button>
+        <button className={mode === "signup" ? "on" : ""} onClick={() => { setMode("signup"); setErr(""); }}>Регистрация</button>
+      </div>
+      <label className="pt-label">Логин
+        <input className="pt-input" name="login" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" value={login}
+          onChange={(e) => setLogin(mode === "signup" ? e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "") : e.target.value)} placeholder="mira_glow" maxLength={mode === "signup" ? 24 : 80} />
+        {mode === "signup" && <span className="pt-hint">3–24 символа: латиница, цифры, _. Будет в твоих ссылках, поменять нельзя.</span>}
+      </label>
+      <label className="pt-label">Пароль
+        <input className="pt-input" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={pw} onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && mode === "login" && loginOk && pw) doLogin(); }} />
+        {mode === "signup" && <span className="pt-hint">Минимум 8 символов</span>}
+      </label>
+      {mode === "signup" && (
         <>
-          <label className="pt-label">Твой email
-            <input className="pt-input" type="email" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@gmail.com" onKeyDown={(e) => { if (e.key === "Enter" && email.includes("@")) send(); }} />
+          <label className="pt-label">Повтори пароль
+            <input className="pt-input" name="password2" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
           </label>
-          {pwMode ? (
-            <>
-              <label className="pt-label">Пароль (если мы выдали его тебе)
-                <input className="pt-input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && pw) loginPw(); }} />
-              </label>
-              <button className="pt-btn primary wide" disabled={!email.includes("@") || !pw || busy} onClick={loginPw}>{busy ? "Вхожу…" : "Войти"}</button>
-              <p className="pt-note"><button className="pt-linkbtn" onClick={() => setPwMode(false)}>← Войти по коду из письма</button></p>
-            </>
-          ) : (
-            <>
-              <button className="pt-btn primary wide" disabled={!email.includes("@") || busy} onClick={send}>{busy ? "Отправляю…" : "Получить код на почту"}</button>
-              <p className="pt-note">Пароль не нужен. Первый вход = регистрация. <button className="pt-linkbtn" onClick={() => setPwMode(true)}>Есть пароль от нас?</button></p>
-            </>
-          )}
-        </>
-      ) : (
-        <>
-          <p>Письмо отправлено на <b>{email}</b>. Проверь «Входящие» и «Спам».</p>
-          <label className="pt-label">Код из письма
-            <input className="pt-input pt-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="123456" onKeyDown={(e) => { if (e.key === "Enter" && code.length >= 6) verifyCode(); }} />
+          <label className="pt-label">Telegram
+            <input className="pt-input" name="telegram" autoCapitalize="none" value={tg} onChange={(e) => setTg(e.target.value)} placeholder="@username" />
           </label>
-          <button className="pt-btn primary wide" disabled={code.length < 6 || busy} onClick={verifyCode}>{busy ? "Проверяю…" : "Войти"}</button>
-          <p className="pt-note">В письме только кнопка-ссылка? Нажми её в этом же браузере. Если она открывает пустую страницу — <button className="pt-linkbtn" onClick={() => setShowPaste((v) => !v)}>вставь ссылку сюда</button>.</p>
-          {showPaste && (
-            <div className="pt-paste">
-              <input className="pt-input" value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="https://…supabase.co/auth/v1/verify?token=…" />
-              <button className="pt-btn" disabled={!pasted || busy} onClick={verifyLink}>Войти по ссылке</button>
-            </div>
-          )}
-          <button className="pt-linkbtn" onClick={() => { setStep("email"); setCode(""); setErr(""); }}>← Другой email / отправить ещё раз</button>
+          {(["TT", "IG", "YT"] as PPlatform[]).map((p) => (
+            <label className="pt-label" key={p}>{PLATFORM_ICON[p]} {PLATFORM_LABEL[p]} (необязательно)
+              <input className="pt-input" name={`h_${p}`} autoCapitalize="none" value={h[p] ?? ""} onChange={(e) => setH({ ...h, [p]: e.target.value })} placeholder="@account" />
+            </label>
+          ))}
+          <input className="pt-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" name="website" value={hp} onChange={(e) => setHp(e.target.value)} />
         </>
       )}
+      {mode === "login"
+        ? <button className="pt-btn primary wide" disabled={!loginOk || !pw || busy} onClick={doLogin}>{busy ? "Вхожу…" : "Войти"}</button>
+        : <button className="pt-btn primary wide" disabled={!loginOk || !pw || !pw2 || busy} onClick={doSignup}>{busy ? "Создаю аккаунт…" : "Зарегистрироваться"}</button>}
       {err && <div className="pt-err">{err}</div>}
+      <p className="pt-note">🔐 Запомни пароль — восстановить его можно только через {CONTACT_TG} в Telegram. Почта не нужна.</p>
+      {mode === "signup" && <p className="pt-note">После регистрации заявку проверит команда Likky — обычно быстро. Потом откроются товары и ссылки.</p>}
       <p className="pt-note"><Link href="/guide/creator">📋 Как это работает — инструкция и FAQ</Link></p>
+    </section>
+  );
+}
+
+function StatusScreen({ me, onSignOut }: { me: Profile; onSignOut: () => void }) {
+  const pending = me.status === "PENDING";
+  return (
+    <section className="pt-card pt-login">
+      <div className="pt-emoji">{pending ? "⏳" : "🔒"}</div>
+      <h2>{pending ? "Заявка на рассмотрении" : "Доступ закрыт"}</h2>
+      {pending ? (
+        <>
+          <p>Привет, <b>@{me.nick}</b>! Мы получили твою заявку. Как только команда Likky её одобрит, здесь появятся товары и твои ссылки.</p>
+          <p>Чтобы ускорить — напиши {CONTACT_TG} в Telegram: свой логин <b>{me.nick}</b> и ссылку на свой аккаунт.</p>
+        </>
+      ) : <p>Доступ к кабинету сейчас закрыт. Если это ошибка — напиши {CONTACT_TG} в Telegram.</p>}
+      <p className="pt-note"><Link href="/guide/creator">📋 Пока можно прочитать инструкцию и FAQ</Link></p>
+      <button className="pt-btn wide" onClick={onSignOut}>Выйти</button>
     </section>
   );
 }
@@ -140,7 +145,7 @@ function ProfileForm({ c, me, email, onSaved }: { c: SupabaseClient; me: Profile
     <section className="pt-card">
       <h2>{me ? "Профиль" : "Давай знакомиться 🙌"}</h2>
       {!me && <p className="pt-dim">Один раз — и можно брать ссылки.</p>}
-      <label className="pt-label">Ник (будет в твоих ссылках)
+      <label className="pt-label">Логин (он же ник в ссылках)
         <input className="pt-input" value={nick} disabled={Boolean(me)} onChange={(e) => setNick(e.target.value.toLowerCase().replace(/^@/, "").replace(/[^a-z0-9_]/g, ""))} placeholder="mira_glow" maxLength={24} />
         <span className="pt-hint">{me ? "Ник менять нельзя — он уже в ссылках." : "Латиница, цифры, _ · 2–24 символа"}</span>
       </label>
@@ -152,7 +157,7 @@ function ProfileForm({ c, me, email, onSaved }: { c: SupabaseClient; me: Profile
           <input className="pt-input" value={h[p] ?? ""} onChange={(e) => setH({ ...h, [p]: e.target.value })} placeholder="@account (если есть)" />
         </label>
       ))}
-      <div className="pt-dim pt-small">Email: {email}</div>
+      {email && <div className="pt-dim pt-small">Email: {email}</div>}
       <button className="pt-btn primary wide" disabled={!nickOk || busy} onClick={save}>{busy ? "Сохраняю…" : me ? "Сохранить" : "Готово — в кабинет"}</button>
       {ok && me && <div className="pt-ok">Сохранено ✓</div>}
       {err && <div className="pt-err">{err}</div>}
@@ -371,9 +376,18 @@ export function PartnerApp() {
   if (!mounted) body = <div className="pt-loading">Загрузка…</div>;
   else if (!supabaseConfigured || !c) body = <section className="pt-card"><p>Кабинет временно недоступен (база не подключена).</p></section>;
   else if (!ready) body = <div className="pt-loading">Загрузка…</div>;
-  else if (!session) body = <LoginView c={c} initialError={hashErr} />;
+  else if (!session) body = <>{hashErr && <div className="pt-err">{hashErr}</div>}<AuthView c={c} /></>;
   else if (!meLoaded) body = <div className="pt-loading">Загрузка профиля…</div>;
-  else if (!me) body = <ProfileForm c={c} me={null} email={session.user.email ?? ""} onSaved={setMe} />;
+  else if (!me) body = (
+    <section className="pt-card pt-login">
+      <div className="pt-emoji">🤔</div>
+      <h2>Нет профиля партнёра</h2>
+      <p>Этот аккаунт не зарегистрирован как партнёр. Выйди и нажми «Регистрация».</p>
+      <p className="pt-note">Админ? Тебе в <Link href="/admin/">/admin/</Link>.</p>
+      <button className="pt-btn wide" onClick={() => c.auth.signOut()}>Выйти</button>
+    </section>
+  );
+  else if (me.status !== "ACTIVE") body = <StatusScreen me={me} onSignOut={() => c.auth.signOut()} />;
   else body = (
     <>
       <nav className="pt-tabs">
@@ -383,7 +397,7 @@ export function PartnerApp() {
       </nav>
       {tab === "links" && <LinksTab c={c} me={me} catalog={catalog} stats={stats} onCreated={loadStats} />}
       {tab === "stats" && <StatsTab stats={stats} range={range} setRange={setRange} catalog={catalog} />}
-      {tab === "profile" && <ProfileForm c={c} me={me} email={session.user.email ?? ""} onSaved={setMe} />}
+      {tab === "profile" && <ProfileForm c={c} me={me} email={isInternalEmail(session.user.email) ? "" : session.user.email ?? ""} onSaved={setMe} />}
     </>
   );
 

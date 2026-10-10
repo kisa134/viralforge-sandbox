@@ -670,3 +670,21 @@ mark.ph { background: #3a2c0a; color: #ffcf6b; border: 1px dashed #8a6a1a; borde
 .pt-foot { text-align: center; font-size: 12px; color: var(--text-dim); padding: 16px; border-top: 1px solid var(--border); }
 .pt-card code { background: #151a24; padding: 1px 5px; border-radius: 5px; }
 @media (min-width: 600px) { .pt-main { padding: 16px; } .pt-kpis { grid-template-columns: repeat(3, 1fr); } }
+.pt-seg.two { grid-template-columns: repeat(2, 1fr); margin: 14px 0 4px; }
+.pt-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+/* Admin (/admin) */
+.ad-card .ad-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 16px; margin-bottom: 6px; }
+.ad-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13.5px; margin-bottom: 8px; }
+.ad-meta a { color: var(--accent); text-decoration: none; }
+.ad-actions { margin-top: 10px; }
+.ad-actions .pt-btn { flex: 1; }
+.ad-stats { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
+.ad-st { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.ad-st.st-ACTIVE { color: var(--ok); border-color: #1f5a44; }
+.ad-st.st-FROZEN, .ad-st.st-REJECTED { color: #ffc9c9; border-color: #5a2424; }
+.ad-off { opacity: 0.8; }
+.ad-rate { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ad-rate .pt-input.sm { width: auto; flex: 1; min-width: 120px; padding: 9px 10px; font-size: 14px; }
+.ad-toast { position: sticky; top: 64px; z-index: 6; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: #13202b; border: 1px solid #24435a; color: #bfe3ff; font-size: 13.5px; }
+.ad-newpw { border-color: #5a3a18; }
+.ad-admin { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

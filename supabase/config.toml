@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.shopify-orders-webhook]
 verify_jwt = false
+
+[functions.partner-signup]
+verify_jwt = false
+
+[functions.partner-admin]
+verify_jwt = true

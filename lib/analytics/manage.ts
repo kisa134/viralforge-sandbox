@@ -83,7 +83,7 @@ export class SupabaseManageStore implements ManageStore {
     const g = settings.find((s: R) => s.key === "global");
     if (g) ws.settings = { ...ws.settings, ...g.value };
     ws.products = products.map((p: R) => ({ id: p.id, title: p.title, handle: p.handle, price_cents: p.price_cents, cogs_cents: p.cogs_cents, keyword: DEFAULT_PRODUCTS.find((d) => d.handle === p.handle)?.keyword ?? "LIKKY" }));
-    ws.creators = creators.map((c: R) => ({ id: c.id, nick: c.display_name, contact: c.contact ?? c.telegram ?? "", email: c.email ?? null, self_signup: Boolean(c.self_signup), handles: { IG: "", TT: "", YT: "", ...(c.handles ?? {}) }, promo_code: promos.find((p: R) => p.creator_id === c.id)?.code ?? "", payout_rule: c.payout_rule, payout_value: c.payout_value === null ? null : Number(c.payout_value), status: c.status === "ACTIVE" ? "ACTIVE" : "PAUSED", created_at: c.created_at }));
+    ws.creators = creators.map((c: R) => ({ id: c.id, nick: c.display_name, contact: c.contact ?? c.telegram ?? "", email: c.email && !String(c.email).endsWith("@partners.likky.invalid") ? c.email : null, self_signup: Boolean(c.self_signup), login: c.login ?? null, db_status: c.status, handles: { IG: "", TT: "", YT: "", ...(c.handles ?? {}) }, promo_code: promos.find((p: R) => p.creator_id === c.id)?.code ?? "", payout_rule: c.payout_rule, payout_value: c.payout_value === null ? null : Number(c.payout_value), status: c.status === "ACTIVE" ? "ACTIVE" : "PAUSED", created_at: c.created_at }));
     const productByOffer = new Map(offers.map((o: R) => [o.id, o.product_id]));
     ws.links = links.filter((l: R) => !l.revoked_at).map((l: R) => ({ code: l.token, creator_id: l.creator_id, product_id: productByOffer.get(l.offer_id) ?? "", platform: l.platform ?? "IG", keyword: l.keyword ?? "", url: l.dest_url, short_url: shortLink(l.token), permalink: null, created_at: l.created_at }));
     ws.payouts = payouts.map((p: R) => ({ id: p.id, creator_id: p.creator_id, commission_ids: [], amount_cents: p.amount_cents, paid_at: p.paid_at, note: p.proof_ref ?? "" }));
@@ -91,7 +91,7 @@ export class SupabaseManageStore implements ManageStore {
   }
   async saveCreator(cr: WsCreator) {
     const c = this.c();
-    await unwrap(c.from("creator").upsert({ id: cr.id, type: "PARTNER_HUMAN", display_name: cr.nick, contact: cr.contact, handles: cr.handles, payout_rule: cr.payout_rule, payout_value: cr.payout_value, status: cr.status === "ACTIVE" ? "ACTIVE" : "FROZEN", activated_at: cr.created_at }));
+    await unwrap(c.from("creator").upsert({ id: cr.id, type: "PARTNER_HUMAN", display_name: cr.nick, contact: cr.contact, handles: cr.handles, payout_rule: cr.payout_rule, payout_value: cr.payout_value, status: cr.status === "ACTIVE" ? "ACTIVE" : cr.db_status && cr.db_status !== "ACTIVE" ? cr.db_status : "FROZEN", activated_at: cr.created_at }));
     await unwrap(c.from("promo_code").upsert({ code: cr.promo_code, creator_id: cr.id, status: "ACTIVE" }));
   }
   async deleteCreator(id: string) {

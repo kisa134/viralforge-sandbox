@@ -18,6 +18,7 @@ export interface WsProduct { id: string; title: string; handle: string; price_ce
 export interface WsCreator {
   id: string; nick: string; contact: string; handles: { IG: string; TT: string; YT: string };
   email?: string | null; self_signup?: boolean; // set for partners who registered themselves in /partner
+  login?: string | null; db_status?: string; // DB-only: partner login and raw status (PENDING/REJECTED/FROZEN…)
   promo_code: string; // internal creator id «LIKKY-NICK» (not a Shopify discount code; matched only if a code happens to exist)
   payout_rule: PayoutRule | null; payout_value: number | null; status: "ACTIVE" | "PAUSED"; created_at: string;
 }

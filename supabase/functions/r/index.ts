@@ -42,6 +42,10 @@ Deno.serve(async (req) => {
 
   let dest: URL;
   try { dest = new URL(link.dest_url); } catch { return redirect(FALLBACK); }
+
+  // Only ACTIVE creators get attribution: for pending/blocked partners send the buyer to the plain product page (no ref/utm, no click log).
+  const { data: cr } = await db.from("creator").select("status").eq("id", link.creator_id).maybeSingle();
+  if (cr?.status !== "ACTIVE") return redirect(`${dest.origin}${dest.pathname}`);
   if (!dest.searchParams.has("ref")) dest.searchParams.set("ref", slug);
 
   const ua = req.headers.get("user-agent") ?? "";
