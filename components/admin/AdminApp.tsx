@@ -5,8 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { sb, supabaseConfigured } from "@/lib/analytics/sbClient";
 import {
-  adminAddAdmin, adminListAdmins, adminPartners, adminRemoveAdmin, adminResetPassword, adminSetRate, adminSetStatus, adminWhoami,
-  loginToEmail, payoutText, PLATFORM_ICON, usd, type AdminPartner, type AdminRow, type PPlatform,
+  adminAddAdmin, adminGetDefaultRate, adminListAdmins, adminPartners, adminRemoveAdmin, adminResetPassword, adminSetDefaultRate, adminSetRate, adminSetStatus, adminWhoami,
+  loginToEmail, payoutText, PLATFORM_ICON, usd, type AdminPartner, type AdminRow, type PPlatform, type Rate,
 } from "@/lib/partner";
 
 type Tab = "requests" | "partners" | "admins";
@@ -57,6 +57,40 @@ function AdminLogin({ c }: { c: SupabaseClient }) {
   );
 }
 
+function DefaultRateEditor({ c, rate, onDone, toast }: { c: SupabaseClient; rate: Rate | null; onDone: () => void; toast: (m: string) => void }) {
+  const [rule, setRule] = useState("PCT_REVENUE");
+  const [val, setVal] = useState("");
+  useEffect(() => {
+    if (!rate) return;
+    const r = rate.rule === "CPA_FIXED" ? "CPA_FIXED" : "PCT_REVENUE";
+    setRule(r);
+    setVal(rate.value === null ? "" : String(r === "CPA_FIXED" ? Number(rate.value) : +(Number(rate.value) * 100).toFixed(2)));
+  }, [rate]);
+  const save = async () => {
+    try {
+      const n = Number(val.replace(",", "."));
+      if (val.trim() === "" || !Number.isFinite(n) || n < 0 || (rule === "PCT_REVENUE" && n > 100)) throw new Error(rule === "PCT_REVENUE" ? "Введите процент от 0 до 100" : "Введите сумму в $");
+      const v = rule === "CPA_FIXED" ? n : n / 100;
+      await adminSetDefaultRate(c, rule, v);
+      toast(`Ставка по умолчанию: ${payoutText(rule, v)}`); onDone();
+    } catch (e) { toast("Ошибка: " + (e as Error).message); }
+  };
+  return (
+    <section className="pt-card ad-card">
+      <h3>💰 Ставка по умолчанию</h3>
+      <p className="pt-dim pt-small">Сейчас: <b>{rate ? payoutText(rate.rule, rate.value) : "…"}</b>. Действует для всех партнёров и товаров, если у партнёра или товара не задана своя. % считается от суммы товаров после скидок, без доставки и налога.</p>
+      <div className="ad-rate">
+        <select className="pt-input sm" value={rule} onChange={(e) => setRule(e.target.value)}>
+          <option value="PCT_REVENUE">% от заказа</option>
+          <option value="CPA_FIXED">$ фикс за продажу</option>
+        </select>
+        <input className="pt-input sm" inputMode="decimal" value={val} onChange={(e) => setVal(e.target.value)} placeholder={rule === "CPA_FIXED" ? "напр. 5" : "напр. 15"} />
+        <button className="pt-btn primary" onClick={save}>Сохранить</button>
+      </div>
+    </section>
+  );
+}
+
 function RateEditor({ c, p, onDone, toast }: { c: SupabaseClient; p: AdminPartner; onDone: () => void; toast: (m: string) => void }) {
   const [rule, setRule] = useState(p.payout_rule ?? "");
   const [val, setVal] = useState(p.payout_value === null ? "" : String(p.payout_rule === "CPA_FIXED" ? p.payout_value : +(Number(p.payout_value) * 100).toFixed(2)));
@@ -65,13 +99,13 @@ function RateEditor({ c, p, onDone, toast }: { c: SupabaseClient; p: AdminPartne
       const n = val.trim() === "" ? null : Number(val.replace(",", "."));
       if (rule && (n === null || !Number.isFinite(n) || n < 0)) throw new Error("Введите число");
       await adminSetRate(c, p.id, rule || null, rule ? (rule === "CPA_FIXED" ? n : (n as number) / 100) : null);
-      toast(`Ставка @${p.login}: ${rule ? payoutText(rule, rule === "CPA_FIXED" ? n : (n as number) / 100) : "как у товара / общая"}`); onDone();
+      toast(`Ставка @${p.login}: ${rule ? payoutText(rule, rule === "CPA_FIXED" ? n : (n as number) / 100) : "по умолчанию"}`); onDone();
     } catch (e) { toast("Ошибка: " + (e as Error).message); }
   };
   return (
     <div className="ad-rate">
       <select className="pt-input sm" value={rule} onChange={(e) => setRule(e.target.value)}>
-        <option value="">Ставка: общая / как у товара</option>
+        <option value="">Ставка: по умолчанию</option>
         <option value="CPA_FIXED">$ за продажу</option>
         <option value="PCT_REVENUE">% от суммы заказа</option>
       </select>
@@ -94,6 +128,7 @@ export function AdminApp() {
   const [newPw, setNewPw] = useState<{ login: string; pw: string } | null>(null);
   const [newAdmin, setNewAdmin] = useState("");
   const [q, setQ] = useState("");
+  const [defRate, setDefRate] = useState<Rate | null>(null);
 
   useEffect(() => { setC(sb()); setMounted(true); }, []);
   useEffect(() => {
@@ -109,7 +144,7 @@ export function AdminApp() {
   const toast = (m: string) => { setMsg(m); setTimeout(() => setMsg((x) => (x === m ? "" : x)), 4000); };
   const reload = useCallback(async () => {
     if (!c || !who?.is_admin) return;
-    try { const [p, a] = await Promise.all([adminPartners(c), adminListAdmins(c)]); setPartners(p); setAdmins(a); } catch (e) { toast("Ошибка: " + (e as Error).message); }
+    try { const [p, a, d] = await Promise.all([adminPartners(c), adminListAdmins(c), adminGetDefaultRate(c)]); setPartners(p); setAdmins(a); setDefRate(d); } catch (e) { toast("Ошибка: " + (e as Error).message); }
   }, [c, who]);
   useEffect(() => { reload(); }, [reload]);
 
@@ -169,6 +204,7 @@ export function AdminApp() {
 
       {tab === "partners" && (
         <>
+          <DefaultRateEditor c={c} rate={defRate} onDone={reload} toast={toast} />
           <input className="pt-input" style={{ marginBottom: 10 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 Поиск по логину или Telegram" />
           {!others.length && <section className="pt-card"><p className="pt-dim">Пока никого.</p></section>}
           {others.map((p) => (
@@ -179,7 +215,7 @@ export function AdminApp() {
                 <span>🔗 {p.links}</span><span>👆 {p.clicks}</span><span>🛒 {p.orders}</span><span>💵 {usd(p.revenue_cents)}</span>
                 <span>💰 {usd(p.earned_cents)}</span><span>💸 {usd(p.paid_cents)}</span>
               </div>
-              <div className="pt-dim pt-small">Ставка: {p.payout_rule ? payoutText(p.payout_rule, p.payout_value) : "общая / как у товара"} · с {fmtDate(p.created_at)}</div>
+              <div className="pt-dim pt-small">Ставка: <b>{p.effective ? payoutText(p.effective.rule, p.effective.value) : p.payout_rule ? payoutText(p.payout_rule, p.payout_value) : "по умолчанию"}</b> ({p.payout_rule ? "индивидуальная" : "по умолчанию"}) · с {fmtDate(p.created_at)}</div>
               <RateEditor c={c} p={p} onDone={reload} toast={toast} />
               <div className="pt-row ad-actions">
                 {p.status === "ACTIVE"

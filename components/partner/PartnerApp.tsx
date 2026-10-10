@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { sb, shortLink, supabaseConfigured, SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/analytics/sbClient";
 import {
-  captionFor, CONTACT_TG, createLink, getCatalog, getMe, getStats, isInternalEmail, loginToEmail, normLogin, payoutText, PLATFORM_ICON, PLATFORM_LABEL, register, signupPartner, usd,
+  captionFor, CONTACT_TG, createLink, getCatalog, getMe, getStats, isInternalEmail, loginToEmail, normLogin, payoutCents, payoutText, rateHeadline, PLATFORM_ICON, PLATFORM_LABEL, register, signupPartner, usd,
   type CatalogItem, type NewLink, type PPlatform, type Profile, type Stats,
 } from "@/lib/partner";
 
@@ -191,6 +191,7 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
   return (
     <>
       {frozen && <div className="pt-err">Аккаунт приостановлен — новые ссылки недоступны. Напиши нам в Telegram.</div>}
+      {rateHeadline(me.rate) && <div className="pt-rate">💰 Твоя ставка: <b>{rateHeadline(me.rate)}</b>{me.rate?.rule === "PCT_REVENUE" && <span className="pt-dim pt-small"> — от суммы товаров после скидок, без доставки и налога</span>}</div>}
       <section className="pt-card">
         <h3>1. Выбери товар</h3>
         <div className="pt-products">
@@ -199,7 +200,9 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
               {p.image_url ? <img src={p.image_url} alt={p.title} loading="lazy" /> : <div className="pt-noimg">🛍</div>}
               <div className="pt-prod-body">
                 <div className="pt-prod-title">{p.title}</div>
-                <div className="pt-prod-price">{usd(p.price_cents)} · <span className={p.payout_value === null ? "pt-tbd" : "pt-pay"}>{payoutText(p.payout_rule, p.payout_value)}</span></div>
+                <div className="pt-prod-price">{usd(p.price_cents)} · {(() => { const pc = payoutCents(p.payout_rule, p.payout_value, p.price_cents); return pc !== null
+                  ? <span className="pt-pay">твои {usd(pc)}{p.payout_rule === "PCT_REVENUE" ? ` (${payoutText(p.payout_rule, p.payout_value).replace(" от суммы заказа", "")})` : ""}</span>
+                  : <span className={p.payout_value === null ? "pt-tbd" : "pt-pay"}>{payoutText(p.payout_rule, p.payout_value)}</span>; })()}</div>
                 {p.pitch && <div className="pt-prod-pitch">{p.pitch}</div>}
               </div>
             </button>
@@ -271,15 +274,17 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
 }
 
 // ───────────────────────── Stats tab ─────────────────────────
-function StatsTab({ stats, range, setRange, catalog, onRefresh }: { stats: Stats | null; range: string; setRange: (r: string) => void; catalog: CatalogItem[]; onRefresh: () => void }) {
+function StatsTab({ stats, range, setRange, catalog, onRefresh, me }: { stats: Stats | null; range: string; setRange: (r: string) => void; catalog: CatalogItem[]; onRefresh: () => void; me: Profile }) {
   const t = stats?.totals;
-  const rateKnown = catalog.some((p) => p.payout_value !== null);
+  const head = rateHeadline(me.rate);
+  const rateKnown = !!head || catalog.some((p) => p.payout_value !== null);
   return (
     <>
       <div className="pt-seg">
         {[["7", "7 дней"], ["30", "30 дней"], ["all", "Всё время"]].map(([k, l]) => <button key={k} className={range === k ? "on" : ""} onClick={() => setRange(k)}>{l}</button>)}
       </div>
       <button className="pt-linkbtn pt-small" onClick={onRefresh}>🔄 Обновить</button>
+      {head && <div className="pt-rate">💰 Твоя ставка: <b>{head}</b></div>}
       {!rateKnown && <div className="pt-info">Ставка за продажу уточняется — продажи уже считаются, сумма начислится, когда ставка будет задана.</div>}
       <div className="pt-kpis">
         <div className="pt-kpi"><span>Клики</span><b>{t?.clicks ?? 0}</b></div>
@@ -397,7 +402,7 @@ export function PartnerApp() {
         <button className={tab === "profile" ? "on" : ""} onClick={() => setTab("profile")}>👤 Профиль</button>
       </nav>
       {tab === "links" && <LinksTab c={c} me={me} catalog={catalog} stats={stats} onCreated={loadStats} />}
-      {tab === "stats" && <StatsTab stats={stats} range={range} setRange={setRange} catalog={catalog} onRefresh={loadStats} />}
+      {tab === "stats" && <StatsTab stats={stats} range={range} setRange={setRange} catalog={catalog} onRefresh={loadStats} me={me} />}
       {tab === "profile" && <ProfileForm c={c} me={me} email={isInternalEmail(session.user.email) ? "" : session.user.email ?? ""} onSaved={setMe} />}
     </>
   );

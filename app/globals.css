@@ -688,3 +688,4 @@ mark.ph { background: #3a2c0a; color: #ffcf6b; border: 1px dashed #8a6a1a; borde
 .ad-toast { position: sticky; top: 64px; z-index: 6; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: #13202b; border: 1px solid #24435a; color: #bfe3ff; font-size: 13.5px; }
 .ad-newpw { border-color: #5a3a18; }
 .ad-admin { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pt-rate { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: #0f2a1a; border: 1px solid #1f6b3e; color: #b8f5cf; font-size: 14px; line-height: 1.45; }
