@@ -82,7 +82,7 @@ function EconView({ c, m, units, reload, toast }: { c: SupabaseClient; m: BizMet
     <>
       <section className="pt-card">
         <h3>🧮 Юнит-экономика (1 заказ = 1 товар)</h3>
-        <p className="pt-dim pt-small">Себестоимость = товар CJ + доставка в США. Креатор — эффективная ставка ({m.settings.payout_rule === "PCT_REVENUE" ? `${((m.settings.payout_value ?? 0) * 100).toFixed(0)}% от суммы` : "фикс"}). Резерв на возвраты = {(m.settings.refund_rate * 100).toFixed(0)}% цены. <b>Max CPA</b> — сколько максимум можно отдать за заказ (креатору + реклама), чтобы выйти в ноль.</p>
+        <p className="pt-dim pt-small">Себестоимость = товар CJ + доставка в США. Креатор — эффективная ставка ({m.settings.payout_rule === "PCT_MARGIN" ? `${((m.settings.payout_value ?? 0) * 100).toFixed(0)}% от маржи = (цена − себестоимость) × ${((m.settings.payout_value ?? 0) * 100).toFixed(0)}%` : m.settings.payout_rule === "PCT_REVENUE" ? `${((m.settings.payout_value ?? 0) * 100).toFixed(0)}% от суммы` : "фикс"}). Резерв на возвраты = {(m.settings.refund_rate * 100).toFixed(0)}% цены. <b>Max CPA</b> — сколько максимум можно отдать за заказ (креатору + реклама), чтобы выйти в ноль.</p>
         <div className="bz-tablewrap">
           <table className="bz-table">
             <thead><tr><th>Товар</th><th>Цена</th><th>Себест.</th><th>Креатор</th><th>Комиссия</th><th>Резерв</th><th>Прибыль</th><th>Маржа</th><th>Max CPA</th></tr></thead>

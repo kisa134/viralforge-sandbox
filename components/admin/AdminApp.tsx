@@ -140,14 +140,14 @@ function DefaultRateEditor({ c, rate, onDone, toast }: { c: SupabaseClient; rate
   const [val, setVal] = useState("");
   useEffect(() => {
     if (!rate) return;
-    const r = rate.rule === "CPA_FIXED" ? "CPA_FIXED" : "PCT_REVENUE";
+    const r = rate.rule === "CPA_FIXED" || rate.rule === "PCT_MARGIN" ? rate.rule : "PCT_REVENUE";
     setRule(r);
     setVal(rate.value === null ? "" : String(r === "CPA_FIXED" ? Number(rate.value) : +(Number(rate.value) * 100).toFixed(2)));
   }, [rate]);
   const save = async () => {
     try {
       const n = Number(val.replace(",", "."));
-      if (val.trim() === "" || !Number.isFinite(n) || n < 0 || (rule === "PCT_REVENUE" && n > 100)) throw new Error(rule === "PCT_REVENUE" ? "Введите процент от 0 до 100" : "Введите сумму в $");
+      if (val.trim() === "" || !Number.isFinite(n) || n < 0 || (rule !== "CPA_FIXED" && n > 100)) throw new Error(rule !== "CPA_FIXED" ? "Введите процент от 0 до 100" : "Введите сумму в $");
       const v = rule === "CPA_FIXED" ? n : n / 100;
       await adminSetDefaultRate(c, rule, v);
       toast(`Ставка по умолчанию: ${payoutText(rule, v)}`); onDone();
@@ -156,9 +156,10 @@ function DefaultRateEditor({ c, rate, onDone, toast }: { c: SupabaseClient; rate
   return (
     <section className="pt-card ad-card">
       <h3>💰 Ставка по умолчанию</h3>
-      <p className="pt-dim pt-small">Сейчас: <b>{rate ? payoutText(rate.rule, rate.value) : "…"}</b>. Действует для всех партнёров и товаров, если у партнёра или товара не задана своя. % считается от суммы товаров после скидок, без доставки и налога.</p>
+      <p className="pt-dim pt-small">Сейчас: <b>{rate ? payoutText(rate.rule, rate.value) : "…"}</b>. Действует для всех партнёров и товаров, если у партнёра или товара не задана своя. «% от заказа» — от суммы товаров после скидок (без доставки и налога); «% от маржи» — от этой суммы минус себестоимость с доставкой (CJ). Без себестоимости начисление уходит «на проверку».</p>
       <div className="ad-rate">
         <select className="pt-input sm" value={rule} onChange={(e) => setRule(e.target.value)}>
+          <option value="PCT_MARGIN">% от маржи (заказ − себестоимость)</option>
           <option value="PCT_REVENUE">% от заказа</option>
           <option value="CPA_FIXED">$ фикс за продажу</option>
         </select>
@@ -186,6 +187,7 @@ function RateEditor({ c, p, onDone, toast }: { c: SupabaseClient; p: AdminPartne
         <option value="">Ставка: по умолчанию</option>
         <option value="CPA_FIXED">$ за продажу</option>
         <option value="PCT_REVENUE">% от суммы заказа</option>
+        <option value="PCT_MARGIN">% от маржи</option>
       </select>
       {rule && <input className="pt-input sm" inputMode="decimal" value={val} onChange={(e) => setVal(e.target.value)} placeholder={rule === "CPA_FIXED" ? "напр. 5" : "напр. 10"} />}
       <button className="pt-btn" onClick={save}>Сохранить</button>

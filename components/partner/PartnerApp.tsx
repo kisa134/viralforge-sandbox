@@ -192,7 +192,7 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
   return (
     <>
       {frozen && <div className="pt-err">Аккаунт приостановлен — новые ссылки недоступны. Напиши нам в Telegram.</div>}
-      {rateHeadline(me.rate) && <div className="pt-rate">💰 Твоя ставка: <b>{rateHeadline(me.rate)}</b>{me.rate?.rule === "PCT_REVENUE" && <span className="pt-dim pt-small"> — от суммы товаров после скидок, без доставки и налога</span>}</div>}
+      {rateHeadline(me.rate) && <div className="pt-rate">💰 Твоя ставка: <b>{rateHeadline(me.rate)}</b>{me.rate?.rule === "PCT_REVENUE" && <span className="pt-dim pt-small"> — от суммы товаров после скидок, без доставки и налога</span>}{me.rate?.rule === "PCT_MARGIN" && <span className="pt-dim pt-small"> — от нашей маржи; сколько это в $ — у каждого товара ниже</span>}</div>}
       <section className="pt-card">
         <h3>1. Выбери товар</h3>
         <div className="pt-products">
@@ -201,7 +201,7 @@ function LinksTab({ c, me, catalog, stats, onCreated }: { c: SupabaseClient; me:
               {p.image_url ? <img src={p.image_url} alt={p.title} loading="lazy" /> : <div className="pt-noimg">🛍</div>}
               <div className="pt-prod-body">
                 <div className="pt-prod-title">{p.title}</div>
-                <div className="pt-prod-price">{usd(p.price_cents)} · {(() => { const pc = payoutCents(p.payout_rule, p.payout_value, p.price_cents); return pc !== null
+                <div className="pt-prod-price">{usd(p.price_cents)} · {(() => { const pc = p.payout_cents ?? payoutCents(p.payout_rule, p.payout_value, p.price_cents); return pc !== null
                   ? <span className="pt-pay">твои {usd(pc)}{p.payout_rule === "PCT_REVENUE" ? ` (${payoutText(p.payout_rule, p.payout_value).replace(" от суммы заказа", "")})` : ""}</span>
                   : <span className={p.payout_value === null ? "pt-tbd" : "pt-pay"}>{payoutText(p.payout_rule, p.payout_value)}</span>; })()}</div>
                 {p.pitch && <div className="pt-prod-pitch">{p.pitch}</div>}

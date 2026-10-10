@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type PPlatform = "IG" | "TT" | "YT";
 export type Profile = { id: string; nick: string; telegram: string | null; handles: Partial<Record<PPlatform, string>>; status: string; email: string | null; created_at: string; rate?: Rate | null };
 export type Rate = { rule: string | null; value: number | null; source?: "partner" | "default" };
-export type CatalogItem = { product_id: string; title: string; handle: string; pdp_url: string | null; price_cents: number; image_url: string | null; pitch: string | null; payout_rule: string | null; payout_value: number | null };
+export type CatalogItem = { product_id: string; title: string; handle: string; pdp_url: string | null; price_cents: number; image_url: string | null; pitch: string | null; payout_rule: string | null; payout_value: number | null; payout_cents?: number | null };
 export type LinkStat = { token: string; label: string | null; platform: PPlatform | null; created_at: string; revoked: boolean; product_title: string | null; clicks: number; orders: number; revenue_cents: number; held_cents: number; approved_cents: number; paid_cents: number };
 export type Totals = { clicks: number; orders: number; revenue_cents: number; held_cents: number; approved_cents: number; paid_cents: number };
 export type PayoutRow = { period_start: string; period_end: string; amount_cents: number; currency: string; method: string; status: string; paid_at: string | null };
@@ -41,7 +41,7 @@ export function rateHeadline(r: Rate | null | undefined): string | null {
   if (!r || r.value === null || r.value === undefined) return null;
   if (r.rule === "PCT_REVENUE") return `${Math.round(Number(r.value) * 1000) / 10}% с каждого заказа`;
   if (r.rule === "CPA_FIXED") return `$${Number(r.value).toFixed(2)} с каждой продажи`;
-  if (r.rule === "PCT_MARGIN") return `${Math.round(Number(r.value) * 1000) / 10}% от маржи заказа`;
+  if (r.rule === "PCT_MARGIN") return `${Math.round(Number(r.value) * 1000) / 10}% от маржи с каждой продажи`;
   return null;
 }
 /** Commission in cents for one unit at list price (null if unknown). */

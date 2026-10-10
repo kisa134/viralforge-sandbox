@@ -10,7 +10,7 @@ export type BizProduct = {
 export type Flow = { clicks: number; orders: number; revenue_cents: number; total_cents: number; landed_cents: number; commission_cents: number; active_creators?: number };
 export type BizMetrics = {
   generated_at: string; from: string | null; settings: BizSettings;
-  totals: Flow & { orders_cost_missing: number; store_orders: number; store_revenue_cents: number; refunded_orders: number; posts: number; links_created: number; links_total: number; last_click_at: string | null; last_order_at: string | null };
+  totals: Flow & { commissions_needs_review?: number; orders_cost_missing: number; store_orders: number; store_revenue_cents: number; refunded_orders: number; posts: number; links_created: number; links_total: number; last_click_at: string | null; last_order_at: string | null };
   creators: { active: number; pending: number; blocked: number; with_links: number; with_clicks: number; with_orders: number; inactive_7d: number };
   top_creators: { login: string; clicks: number; orders: number; revenue_cents: number }[];
   products: BizProduct[]; weeks: (Flow & { week_start: string })[]; wow: { cur: Flow; prev: Flow };
@@ -36,16 +36,17 @@ export type Unit = {
   maxCpa: number; beRate: number; costMissing: boolean; flags: { level: "warn" | "bad"; text: string }[];
 };
 export const THIN_MARGIN = 0.3;
-export function creatorCents(rule: string | null, value: number | null, priceCents: number) {
+export function creatorCents(rule: string | null, value: number | null, priceCents: number, landedCents = 0) {
   if (value === null || value === undefined) return 0;
   if (rule === "CPA_FIXED") return Math.round(Number(value) * 100);
   if (rule === "PCT_REVENUE") return Math.round(priceCents * Number(value));
+  if (rule === "PCT_MARGIN") return Math.round(Math.max(0, priceCents - landedCents) * Number(value));   // margin = price − landed COGS
   return 0;
 }
 export function unitEconomics(p: BizProduct, s: BizSettings): Unit {
   const price = p.price_cents;
   const landed = (p.cogs_cents ?? 0) + (p.shipping_cost_cents ?? 0);
-  const creator = creatorCents(p.payout_rule, p.payout_value, price);
+  const creator = creatorCents(p.payout_rule, p.payout_value, price, landed);
   const fee = Math.round(price * (s.payment_fee_pct ?? 0.029)) + (s.payment_fee_fixed_cents ?? 30);
   const reserve = Math.round(price * (s.refund_rate ?? 0.05));
   const maxCpa = price - landed - fee - reserve;
@@ -133,6 +134,8 @@ export function adviseRules(m: BizMetrics, units: Unit[], periodDays: number | n
     out.push({ prio: 2, icon: "🐢", title: `${u.p.title}: доставка ${u.p.ship_days_min}–${u.p.ship_days_max} дн.`, why: "Долгая доставка = возвраты и чарджбэки. Пиши срок на странице товара, ищи склад в США или снизь приоритет в роликах." });
   for (const u of valid.filter((x) => x.margin < THIN_MARGIN))
     out.push({ prio: 2, icon: "⚠️", title: `${u.p.title}: прибыль ${usdS(u.profit)} с заказа (${(u.margin * 100).toFixed(0)}%)`, why: `Себестоимость с доставкой ${usdS(u.landed)} из ${usdS(u.price)}. Подними цену, возьми размер дешевле у CJ или не делай его основным.` });
+  if ((t.commissions_needs_review ?? 0) > 0)
+    out.push({ prio: 1, icon: "🧾", title: `${t.commissions_needs_review} начислений ждут проверки — нет себестоимости товара`, why: "Креатору платим 15% от маржи, а без себестоимости маржу не посчитать. Впиши себестоимость в «Юнит-экономике», затем пересчитай заказ в /analytics (ручная привязка)." });
   if (t.orders_cost_missing > 0 || units.some((u) => u.costMissing))
     out.push({ prio: 2, icon: "🧾", title: "Впиши себестоимость всех товаров", why: "Без неё прибыль и советы неточны." });
 

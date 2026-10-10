@@ -112,7 +112,7 @@ async function logEvent(name: string, props: R) {
 async function voidOrClawback(orderId: string, externalId: string, refundId: string | null, reason: string) {
   const cms = unwrap(await db.from("commission").select("*").eq("idempotency_key", `cpa:${externalId}`), "commission lookup") as R[];
   for (const c of cms) {
-    if (c.status === "HELD" || c.status === "APPROVED") {
+    if (c.status === "HELD" || c.status === "APPROVED" || c.status === "NEEDS_REVIEW") {
       unwrap(await db.from("commission").update({ status: "VOID" }).eq("id", c.id), "void");
     } else if (c.status === "PAID") {
       unwrap(await db.from("commission").upsert({
@@ -155,7 +155,7 @@ async function handleOrder(o: R, topic: string) {
   }
 
   // Line items (replace)
-  const products = unwrap(await db.from("product").select("id, title, handle, shopify_product_id, shopify_variant_id, cogs_cents"), "products") as R[];
+  const products = unwrap(await db.from("product").select("id, title, handle, shopify_product_id, shopify_variant_id, cogs_cents, shipping_cost_cents"), "products") as R[];
   const items: R[] = [];
   for (const li of (o.line_items ?? []) as R[]) {
     const pid = li.product_id ? String(li.product_id) : null, vid = li.variant_id ? String(li.variant_id) : null;
@@ -164,7 +164,7 @@ async function handleOrder(o: R, topic: string) {
       ?? products.find((x) => title && (title.includes(String(x.title).toLowerCase()) || String(x.title).toLowerCase().includes(title)));
     if (p && pid && !p.shopify_product_id) { await db.from("product").update({ shopify_product_id: pid }).eq("id", p.id); p.shopify_product_id = pid; }
     const lineDisc = ((li.discount_allocations ?? []) as R[]).reduce((a, d) => a + cents(d.amount), 0);
-    items.push({ order_id: orderId, product_id: p?.id ?? null, variant_id: vid, qty: Math.max(1, Number(li.quantity) || 1), price_cents: cents(li.price), cogs_cents: p?.cogs_cents ?? null, discount_cents: lineDisc });
+    items.push({ order_id: orderId, product_id: p?.id ?? null, variant_id: vid, qty: Math.max(1, Number(li.quantity) || 1), price_cents: cents(li.price), cogs_cents: p && p.cogs_cents !== null ? Number(p.cogs_cents) + Number(p.shipping_cost_cents ?? 0) : null, discount_cents: lineDisc }); // landed unit cost snapshot
   }
   unwrap(await db.from("order_item").delete().eq("order_id", orderId), "items delete");
   if (items.length) unwrap(await db.from("order_item").insert(items), "items insert");
@@ -236,11 +236,21 @@ async function handleOrder(o: R, topic: string) {
     if (rule === "CPA_FIXED") amount = Math.round(value * 100);
     else if (rule === "PCT_REVENUE") { basis = net; amount = Math.round(net * value); }
     else if (rule === "PCT_MARGIN") {
+      // margin = subtotal after discounts (no shipping/tax) − Σ landed cost (CJ product + shipping) × qty, floor 0
       if (items.length && items.every((i) => i.cogs_cents !== null)) {
-        basis = net - items.reduce((a, i) => a + i.cogs_cents * i.qty, 0);
-        amount = Math.max(0, Math.round(basis * value));
+        basis = Math.max(0, net - items.reduce((a, i) => a + i.cogs_cents * i.qty, 0));
+        amount = Math.round(basis * value);
       }
     }
+  }
+  if (amount === null && value !== null && rule === "PCT_MARGIN") {
+    // COGS missing for some item → never pay on a wrong base: park the commission for admin review
+    unwrap(await db.from("commission").upsert({
+      conversion_id: conv.id, creator_id: creatorId, kind: "CPA", basis_cents: null, rate: value, amount_cents: 0,
+      status: "NEEDS_REVIEW", hold_until: null, idempotency_key: `cpa:${externalId}`,
+    }, { onConflict: "idempotency_key", ignoreDuplicates: true }), "commission needs_review");
+    await logEvent("commission_needs_amount", { order_id: orderId, creator_id: creatorId, rule, reason: "missing COGS" });
+    return { orderId, attributed: method, commission: "needs_review" };
   }
   if (amount === null) {
     await logEvent("commission_needs_amount", { order_id: orderId, creator_id: creatorId, rule, reason: value === null ? "payout_value not set" : "missing COGS" });
